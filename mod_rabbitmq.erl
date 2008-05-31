@@ -307,30 +307,15 @@ check_and_bind(XNameBin, QNameBin) ->
 
 unbind_and_delete(XNameBin, QNameBin) ->
     ?DEBUG("Unbinding ~p ~p", [XNameBin, QNameBin]),
-    case rabbit_misc:execute_mnesia_transaction(
-	   fun () ->
-		   case mnesia:wread({amqqueue, ?QNAME(QNameBin)}) of
-		       [] ->
-			   not_found;
-		       [Q] ->
-			   Spec = #binding_spec{exchange_name = ?XNAME(XNameBin),
-						routing_key = <<>>,
-						arguments = []},
-			   rabbit_exchange:delete_binding(Spec, Q),
-			   NewSpecs = lists:delete(Spec, Q#amqqueue.binding_specs),
-			   NewQ = Q#amqqueue{binding_specs = NewSpecs},
-			   mnesia:write(NewQ),
-			   NewQ
-		   end
-	   end) of
-	not_found ->
-	    ?DEBUG("... no such queue", []),
+    case rabbit_amqqueue:delete_binding(?QNAME(QNameBin), ?XNAME(XNameBin), <<>>, []) of
+	{error, not_found} ->
+	    ?DEBUG("... queue not found. Ignoring", []),
 	    ok;
-	#amqqueue{binding_specs = []} = Q ->
+	{ok, Q = #amqqueue{binding_specs = []}} ->
 	    ?DEBUG("... and deleting", []),
 	    rabbit_amqqueue:delete(Q, false, false),
 	    ok;
-	_Q ->
+	{ok, _} ->
 	    ?DEBUG("... and leaving the queue alone", []),
 	    ok
     end.
