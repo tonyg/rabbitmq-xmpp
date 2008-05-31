@@ -191,19 +191,23 @@ do_route(From, To, {xmlelement, "presence", _, _} = Packet) ->
     end,
     ok;
 do_route(From, To, {xmlelement, "message", _, _} = Packet) ->
-    Body = xml:get_subtag_cdata(Packet, "body"),
-    XNameBin = jid_to_xname(To),
-    case To#jid.luser of
+    case xml:get_subtag_cdata(Packet, "body") of
 	"" ->
-	    send_command_reply(To, From, do_command(To, From, Body, parse_command(Body)));
-	_ ->
-	    case xml:get_tag_attr_s("type", Packet) of
-		"error" ->
-		    ?ERROR_MSG("Received error message~n~p -> ~p~n~p", [From, To, Packet]);
+	    ?DEBUG("Ignoring message with empty body", []);
+	Body ->
+	    XNameBin = jid_to_xname(To),
+	    case To#jid.luser of
+		"" ->
+		    send_command_reply(To, From, do_command(To, From, Body, parse_command(Body)));
 		_ ->
-		    rabbit_exchange:simple_publish(false, false, ?XNAME(XNameBin), <<>>,
-						   <<"text/plain">>,
-						   list_to_binary(Body))
+		    case xml:get_tag_attr_s("type", Packet) of
+			"error" ->
+			    ?ERROR_MSG("Received error message~n~p -> ~p~n~p", [From, To, Packet]);
+			_ ->
+			    rabbit_exchange:simple_publish(false, false, ?XNAME(XNameBin), <<>>,
+							   <<"text/plain">>,
+							   list_to_binary(Body))
+		    end
 	    end
     end,
     ok;
@@ -237,8 +241,13 @@ maybe_unsub(From, To, XNameBin, QNameBin) ->
 do_unsub(QJID, XJID, XNameBin, QNameBin) ->
     send_presence(XJID, QJID, "unsubscribe"),
     send_presence(XJID, QJID, "unsubscribed"),
-    stop_consumer(QNameBin, QJID, true),
-    unbind_and_delete(XNameBin, QNameBin).
+    case unbind_and_delete(XNameBin, QNameBin) of
+	no_subscriptions_left ->
+	    stop_consumer(QNameBin, QJID, true),
+	    ok;
+	subscriptions_remain ->
+	    ok
+    end.
 
 get_bound_queues(XNameBin) ->
     XName = ?XNAME(XNameBin),
@@ -310,14 +319,14 @@ unbind_and_delete(XNameBin, QNameBin) ->
     case rabbit_amqqueue:delete_binding(?QNAME(QNameBin), ?XNAME(XNameBin), <<>>, []) of
 	{error, not_found} ->
 	    ?DEBUG("... queue not found. Ignoring", []),
-	    ok;
+	    no_subscriptions_left;
 	{ok, Q = #amqqueue{binding_specs = []}} ->
 	    ?DEBUG("... and deleting", []),
 	    rabbit_amqqueue:delete(Q, false, false),
-	    ok;
+	    no_subscriptions_left;
 	{ok, _} ->
 	    ?DEBUG("... and leaving the queue alone", []),
-	    ok
+	    subscriptions_remain
     end.
 
 all_exchanges() ->
