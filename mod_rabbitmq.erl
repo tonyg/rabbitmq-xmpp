@@ -75,7 +75,7 @@ stop(Host) ->
 %%---------------------------------------------------------------------------
 
 init([Host, Opts]) ->
-    case catch rabbit_mnesia:raw_create_rabbit_tables() of
+    case catch rabbit_mnesia:create_tables() of
 	{error, {table_creation_failed, _, _, {already_exists, _}}} ->
 	    ok;
 	ok ->
