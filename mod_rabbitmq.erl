@@ -316,18 +316,26 @@ check_and_bind(XNameBin, QNameBin) ->
 
 unbind_and_delete(XNameBin, QNameBin) ->
     ?DEBUG("Unbinding ~p ~p", [XNameBin, QNameBin]),
-    case rabbit_amqqueue:delete_binding(?QNAME(QNameBin), ?XNAME(XNameBin), <<>>, []) of
-	{error, not_found} ->
-	    ?DEBUG("... queue not found. Ignoring", []),
-	    no_subscriptions_left;
-	{ok, Q = #amqqueue{binding_specs = []}} ->
-	    ?DEBUG("... and deleting", []),
-	    rabbit_amqqueue:delete(Q, false, false),
-	    no_subscriptions_left;
-	{ok, _} ->
-	    ?DEBUG("... and leaving the queue alone", []),
-	    subscriptions_remain
-    end.
+    QName = ?QNAME(QNameBin),
+    rabbit_misc:execute_mnesia_transaction(
+      fun () ->
+	      ok = rabbit_amqqueue:delete_binding(QName, ?XNAME(XNameBin), <<>>, []),
+	      case rabbit_amqqueue:is_bound(QName) of
+		  {error, not_found} ->
+		      ?DEBUG("... queue not found. Ignoring", []),
+		      no_subscriptions_left;
+		  {ok, false} ->
+		      ?INFO_MSG("... and deleting", []),
+		      case rabbit_amqqueue:lookup(QName) of
+			  {ok, Q} -> rabbit_amqqueue:delete(Q, false, false);
+			  {error, not_found} -> ok
+		      end,
+		      no_subscriptions_left;
+		  {ok, true} ->
+		      ?INFO_MSG("... and leaving the queue alone", []),
+		      subscriptions_remain
+	      end
+      end).
 
 all_exchanges() ->
     [XNameBin ||
