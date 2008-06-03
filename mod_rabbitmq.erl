@@ -472,7 +472,7 @@ consumer_done(#consumer_state{queue = QNameBin, consumer_tag = ConsumerTag}) ->
 
 parse_command(Str) ->
     [Cmd | Args] = string:tokens(Str, " "),
-    {string:to_lower(Cmd), Args}.
+    {stringprep:tolower(Cmd), Args}.
 
 command_list() ->
     [{"help", "'help (command)'. Provides help for other commands."},
@@ -490,7 +490,7 @@ do_command(_To, _From, _RawCommand, {"help", []}) ->
      "Here is a list of commands. Use 'help (command)' to get details on any one.~n~p",
      [command_names()]};
 do_command(_To, _From, _RawCommand, {"help", [Cmd | _]}) ->
-    case lists:keysearch(string:to_lower(Cmd), 1, command_list()) of
+    case lists:keysearch(stringprep:tolower(Cmd), 1, command_list()) of
 	{value, {_, HelpText}} ->
 	    {ok, HelpText};
 	false ->
