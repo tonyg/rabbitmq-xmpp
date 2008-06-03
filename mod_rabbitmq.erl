@@ -164,8 +164,8 @@ do_route(From, To, {xmlelement, "presence", _, _} = Packet) ->
 		    send_presence(To, From, "subscribed"),
 		    send_presence(To, From, "");
 		false ->
-		    send_presence(To, From, "unsubscribe"),
-		    send_presence(To, From, "unsubscribed")
+		    send_presence(To, From, "unsubscribed"),
+		    send_presence(To, From, "unsubscribe")
 	    end;
 	"unsubscribe" ->
 	    maybe_unsub(From, To, XNameBin, QNameBin),
@@ -239,8 +239,8 @@ maybe_unsub(From, To, XNameBin, QNameBin) ->
     ok.
 
 do_unsub(QJID, XJID, XNameBin, QNameBin) ->
-    send_presence(XJID, QJID, "unsubscribe"),
     send_presence(XJID, QJID, "unsubscribed"),
+    send_presence(XJID, QJID, "unsubscribe"),
     case unbind_and_delete(XNameBin, QNameBin) of
 	no_subscriptions_left ->
 	    stop_consumer(QNameBin, QJID, true),
@@ -307,7 +307,8 @@ check_and_bind(XNameBin, QNameBin) ->
 	{ok, _X} ->
 	    ?DEBUG("... exists", []),
 	    #amqqueue{} = rabbit_amqqueue:declare(?REALM, QNameBin, true, false, []),
-	    ok = rabbit_amqqueue:add_binding(?QNAME(QNameBin), ?XNAME(XNameBin), <<>>, []),
+	    {ok, _NBindings} =
+		rabbit_amqqueue:add_binding(?QNAME(QNameBin), ?XNAME(XNameBin), <<>>, []),
 	    true;
 	{error, not_found} ->
 	    ?DEBUG("... not present", []),
@@ -317,25 +318,22 @@ check_and_bind(XNameBin, QNameBin) ->
 unbind_and_delete(XNameBin, QNameBin) ->
     ?DEBUG("Unbinding ~p ~p", [XNameBin, QNameBin]),
     QName = ?QNAME(QNameBin),
-    rabbit_misc:execute_mnesia_transaction(
-      fun () ->
-	      ok = rabbit_amqqueue:delete_binding(QName, ?XNAME(XNameBin), <<>>, []),
-	      case rabbit_amqqueue:is_bound(QName) of
-		  {error, not_found} ->
-		      ?DEBUG("... queue not found. Ignoring", []),
-		      no_subscriptions_left;
-		  {ok, false} ->
-		      ?INFO_MSG("... and deleting", []),
-		      case rabbit_amqqueue:lookup(QName) of
-			  {ok, Q} -> rabbit_amqqueue:delete(Q, false, false);
-			  {error, not_found} -> ok
-		      end,
-		      no_subscriptions_left;
-		  {ok, true} ->
-		      ?INFO_MSG("... and leaving the queue alone", []),
-		      subscriptions_remain
-	      end
-      end).
+    case rabbit_amqqueue:delete_binding(QName, ?XNAME(XNameBin), <<>>, []) of
+	{error, _} ->
+	    ?DEBUG("... queue, binding or exchange not found. Ignoring", []),
+	    no_subscriptions_left;
+	{ok, 0} ->
+	    ?INFO_MSG("... and deleting", []),
+	    case rabbit_amqqueue:lookup(QName) of
+		{ok, Q} -> rabbit_amqqueue:delete(Q, false, false);
+		{error, not_found} -> ok
+	    end,
+	    ?INFO_MSG("here", []),
+	    no_subscriptions_left;
+	{ok, _PositiveCountOfBindings} ->
+	    ?INFO_MSG("... and leaving the queue alone", []),
+	    subscriptions_remain
+    end.
 
 all_exchanges() ->
     [XNameBin ||
