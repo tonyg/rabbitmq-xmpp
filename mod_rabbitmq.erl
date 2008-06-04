@@ -447,7 +447,7 @@ consumer_main(#consumer_state{priorities = Priorities} = State) ->
 		    ?MODULE:consumer_main(NewState)
 	    end;
 	{presence, JID, Priority} ->
-	    NewPriorities = lists:keysort(1, lists:keystore(JID, 2, Priorities, {-Priority, JID})),
+	    NewPriorities = lists:keysort(1, keystore(JID, 2, Priorities, {-Priority, JID})),
 	    ?MODULE:consumer_main(State#consumer_state{priorities = NewPriorities});
 	{deliver, _ConsumerTag, false, {_QName, _QPid, _Id, _Redelivered, Msg}} ->
 	    #basic_message{exchange_name = #resource{name = XNameBin},
@@ -462,6 +462,15 @@ consumer_main(#consumer_state{priorities = Priorities} = State) ->
 	    ?INFO_MSG("Consumer main ~p got ~p", [State#consumer_state.queue, Other]),
 	    ?MODULE:consumer_main(State)
     end.
+
+%% implementation from R12B-0. When we drop support for R11B, we can
+%% use the system's implementation.
+keystore(Key, N, [H|T], New) when element(N, H) == Key ->
+    [New|T];
+keystore(Key, N, [H|T], New) ->
+    [H|keystore(Key, N, T, New)];
+keystore(_Key, _N, [], New) ->
+    [New].
 
 consumer_done(#consumer_state{queue = QNameBin, consumer_tag = ConsumerTag}) ->
     rabbit_amqqueue:with(?QNAME(QNameBin),
