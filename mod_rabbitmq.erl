@@ -440,9 +440,8 @@ consumer_main(#consumer_state{priorities = Priorities} = State) ->
 			  NewPriorities =
 			      case AllResources of
 				  true ->
-				      lists:filter(fun ({_, {J, _}}) ->
-							   not jids_equal_upto_resource(J, JID)
-						   end, Priorities);
+				      [E || E = {_, {J, _}} <- Priorities,
+					    not jids_equal_upto_resource(J, JID)];
 				  false ->
 				      lists:keydelete({JID, RKBin}, 2, Priorities)
 			      end,
