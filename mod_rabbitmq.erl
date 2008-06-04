@@ -360,9 +360,7 @@ do_unsub(QJID, XJID, XNameBin, RKBin, QNameBin) ->
 get_bound_queues(XNameBin) ->
     XName = ?XNAME(XNameBin),
     [{QNameBin, RKBin} ||
-	#binding{handlers = Handlers} <- rabbit_exchange:bindings_for_exchange(XName),
-	#handler{binding_spec = #binding_spec{routing_key = RKBin},
-		 queue = #resource{name = QNameBin}} <- Handlers].
+	{#resource{name = QNameBin}, RKBin, _} <- rabbit_exchange:list_exchange_bindings(XName)].
 
 unsub_all(XNameBin, ExchangeJID) ->
     {atomic, BindingDescriptions} =
