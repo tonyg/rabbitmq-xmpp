@@ -32,7 +32,7 @@
 -export([start_link/2, start/2, stop/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([route/3]).
--export([consumer_init/4, consumer_main/1]).
+-export([consumer_init/5, consumer_main/1]).
 
 -include("ejabberd.hrl").
 -include("jlib.hrl").
@@ -151,7 +151,7 @@ do_route(From, #jid{luser = ""} = To, {xmlelement, "presence", _, _} = Packet) -
     ok;
 do_route(From, To, {xmlelement, "presence", _, _} = Packet) ->
     QNameBin = jid_to_qname(From),
-    XNameBin = jid_to_xname(To),
+    {XNameBin, RKBin} = jid_to_xname(To),
     case xml:get_tag_attr_s("type", Packet) of
 	"subscribe" ->
 	    case rabbit_exchange:lookup(?XNAME(XNameBin)) of
@@ -159,7 +159,7 @@ do_route(From, To, {xmlelement, "presence", _, _} = Packet) ->
 		{error, not_found} -> send_presence(To, From, "unsubscribed")
 	    end;
 	"subscribed" ->
-	    case check_and_bind(XNameBin, QNameBin) of
+	    case check_and_bind(XNameBin, RKBin, QNameBin) of
 		true ->
 		    send_presence(To, From, "subscribed"),
 		    send_presence(To, From, "");
@@ -168,18 +168,18 @@ do_route(From, To, {xmlelement, "presence", _, _} = Packet) ->
 		    send_presence(To, From, "unsubscribe")
 	    end;
 	"unsubscribe" ->
-	    maybe_unsub(From, To, XNameBin, QNameBin),
+	    maybe_unsub(From, To, XNameBin, RKBin, QNameBin),
 	    send_presence(To, From, "unsubscribed");
 	"unsubscribed" ->
-	    maybe_unsub(From, To, XNameBin, QNameBin);
+	    maybe_unsub(From, To, XNameBin, RKBin, QNameBin);
 
 	"" ->
-	    start_consumer(QNameBin, From, To#jid.lserver, extract_priority(Packet));
+	    start_consumer(QNameBin, From, RKBin, To#jid.lserver, extract_priority(Packet));
 	"unavailable" ->
-	    stop_consumer(QNameBin, From, false);
+	    stop_consumer(QNameBin, From, RKBin, false);
 
 	"probe" ->
-	    case is_subscribed(XNameBin, QNameBin) of
+	    case is_subscribed(XNameBin, RKBin, QNameBin) of
 		true ->
 		    send_presence(To, From, "");
 		false ->
@@ -195,7 +195,7 @@ do_route(From, To, {xmlelement, "message", _, _} = Packet) ->
 	"" ->
 	    ?DEBUG("Ignoring message with empty body", []);
 	Body ->
-	    XNameBin = jid_to_xname(To),
+	    {XNameBin, RKBin} = jid_to_xname(To),
 	    case To#jid.luser of
 		"" ->
 		    send_command_reply(To, From, do_command(To, From, Body, parse_command(Body)));
@@ -204,7 +204,7 @@ do_route(From, To, {xmlelement, "message", _, _} = Packet) ->
 			"error" ->
 			    ?ERROR_MSG("Received error message~n~p -> ~p~n~p", [From, To, Packet]);
 			_ ->
-			    rabbit_exchange:simple_publish(false, false, ?XNAME(XNameBin), <<>>,
+			    rabbit_exchange:simple_publish(false, false, ?XNAME(XNameBin), RKBin,
 							   <<"text/plain">>,
 							   list_to_binary(Body))
 		    end
@@ -226,24 +226,24 @@ extract_priority(Packet) ->
 jid_to_qname(#jid{luser = U, lserver = S}) ->
     list_to_binary(U ++ "@" ++ S).
 
-jid_to_xname(#jid{luser = U}) ->
-    list_to_binary(U).
+jid_to_xname(#jid{luser = U, lresource = R}) ->
+    {list_to_binary(U), list_to_binary(R)}.
 
-maybe_unsub(From, To, XNameBin, QNameBin) ->
-    case is_subscribed(XNameBin, QNameBin) of
+maybe_unsub(From, To, XNameBin, RKBin, QNameBin) ->
+    case is_subscribed(XNameBin, RKBin, QNameBin) of
 	true ->
-	    do_unsub(From, To, XNameBin, QNameBin);
+	    do_unsub(From, To, XNameBin, RKBin, QNameBin);
 	false ->
 	    ok
     end,
     ok.
 
-do_unsub(QJID, XJID, XNameBin, QNameBin) ->
+do_unsub(QJID, XJID, XNameBin, RKBin, QNameBin) ->
     send_presence(XJID, QJID, "unsubscribed"),
     send_presence(XJID, QJID, "unsubscribe"),
-    case unbind_and_delete(XNameBin, QNameBin) of
+    case unbind_and_delete(XNameBin, RKBin, QNameBin) of
 	no_subscriptions_left ->
-	    stop_consumer(QNameBin, QJID, true),
+	    stop_consumer(QNameBin, QJID, none, true),
 	    ok;
 	subscriptions_remain ->
 	    ok
@@ -251,25 +251,27 @@ do_unsub(QJID, XJID, XNameBin, QNameBin) ->
 
 get_bound_queues(XNameBin) ->
     XName = ?XNAME(XNameBin),
-    [QNameBin ||
-	#binding{handlers = Handlers} <- mnesia:read({binding, {XName, fanout}}),
-	#handler{queue = #resource{name = QNameBin}} <- Handlers].
+    [{QNameBin, RKBin} ||
+	#binding{handlers = Handlers} <- rabbit_exchange:bindings_for_exchange(XName),
+	#handler{binding_spec = #binding_spec{routing_key = RKBin},
+		 queue = #resource{name = QNameBin}} <- Handlers].
 
 unsub_all(XNameBin, ExchangeJID) ->
-    {atomic, QNameBins} =
+    {atomic, BindingDescriptions} =
 	mnesia:transaction(
 	  fun () ->
 		  BoundQueues = get_bound_queues(XNameBin),
 		  rabbit_exchange:delete(?XNAME(XNameBin), false),
 		  BoundQueues
 	  end),
-    ?INFO_MSG("unsub_all~n~p~n~p~n~p", [XNameBin, ExchangeJID, QNameBins]),
-    lists:foreach(fun (QNameBin) ->
+    ?INFO_MSG("unsub_all~n~p~n~p~n~p", [XNameBin, ExchangeJID, BindingDescriptions]),
+    lists:foreach(fun ({QNameBin, RKBin}) ->
 			  do_unsub(jlib:string_to_jid(binary_to_list(QNameBin)),
-				   ExchangeJID,
+				   jlib:jid_replace_resource(ExchangeJID, binary_to_list(RKBin)),
 				   XNameBin,
+				   RKBin,
 				   QNameBin)
-		  end, QNameBins),
+		  end, BindingDescriptions),
     ok.
 
 send_presence(From, To, "") ->
@@ -289,38 +291,41 @@ send_message(From, To, TypeStr, BodyStr) ->
     ?DEBUG("Delivering ~p -> ~p~n~p", [From, To, XmlBody]),
     ejabberd_router:route(From, To, XmlBody).
 
-is_subscribed(XNameBin, QNameBin) ->
+is_subscribed(XNameBin, RKBin, QNameBin) ->
     XName = ?XNAME(XNameBin),
     case rabbit_amqqueue:lookup(?QNAME(QNameBin)) of
 	{ok, #amqqueue{binding_specs = Specs}} ->
 	    lists:any(fun 
-			  (#binding_spec{exchange_name = N}) when N == XName -> true;
-			  (_) -> false
+			  (#binding_spec{exchange_name = N, routing_key = R})
+			    when N == XName andalso R == RKBin ->
+			      true;
+			  (_) ->
+			      false
 		      end, Specs);
 	{error, not_found} ->
 	    false
     end.
 
-check_and_bind(XNameBin, QNameBin) ->
-    ?DEBUG("Checking ~p ~p", [XNameBin, QNameBin]),
+check_and_bind(XNameBin, RKBin, QNameBin) ->
+    ?DEBUG("Checking ~p ~p ~p", [XNameBin, RKBin, QNameBin]),
     case rabbit_exchange:lookup(?XNAME(XNameBin)) of
 	{ok, _X} ->
 	    ?DEBUG("... exists", []),
 	    #amqqueue{} = rabbit_amqqueue:declare(?REALM, QNameBin, true, false, []),
 	    {ok, _NBindings} =
-		rabbit_amqqueue:add_binding(?QNAME(QNameBin), ?XNAME(XNameBin), <<>>, []),
+		rabbit_amqqueue:add_binding(?QNAME(QNameBin), ?XNAME(XNameBin), RKBin, []),
 	    true;
 	{error, not_found} ->
 	    ?DEBUG("... not present", []),
 	    false
     end.
 
-unbind_and_delete(XNameBin, QNameBin) ->
-    ?DEBUG("Unbinding ~p ~p", [XNameBin, QNameBin]),
+unbind_and_delete(XNameBin, RKBin, QNameBin) ->
+    ?DEBUG("Unbinding ~p ~p ~p", [XNameBin, RKBin, QNameBin]),
     QName = ?QNAME(QNameBin),
-    case rabbit_amqqueue:delete_binding(QName, ?XNAME(XNameBin), <<>>, []) of
-	{error, _} ->
-	    ?DEBUG("... queue, binding or exchange not found. Ignoring", []),
+    case rabbit_amqqueue:delete_binding(QName, ?XNAME(XNameBin), RKBin, []) of
+	{error, _Reason} ->
+	    ?DEBUG("... queue, binding or exchange not found: ~p. Ignoring", [_Reason]),
 	    no_subscriptions_left;
 	{ok, 0} ->
 	    ?DEBUG("... and deleting", []),
@@ -336,9 +341,20 @@ unbind_and_delete(XNameBin, QNameBin) ->
     end.
 
 all_exchanges() ->
-    [XNameBin ||
-	#exchange{name = #resource{name = XNameBin}, type = fanout}
-	    <- rabbit_exchange:list_vhost_exchanges(?VHOST)].
+    [{binary_to_list(XNameBin),
+      TypeAtom,
+      case IsDurable of
+	  true -> durable;
+	  false -> transient
+      end,
+      Arguments}
+     ||
+	#exchange{name = #resource{name = XNameBin},
+		  type = TypeAtom,
+		  durable = IsDurable,
+		  arguments = Arguments}
+	    <- rabbit_exchange:list_vhost_exchanges(?VHOST),
+	XNameBin =/= <<>>].
 
 probe_queues(Server) ->
     probe_queues(Server, rabbit_amqqueue:list_vhost_queues(?VHOST)).
@@ -367,28 +383,28 @@ probe_bindings(Server, JID,
     send_presence(SourceJID, JID, ""),
     probe_bindings(Server, JID, Rest).
 
-start_consumer(QNameBin, JID, Server, Priority) ->
+start_consumer(QNameBin, JID, RKBin, Server, Priority) ->
     mnesia:transaction(
       fun () ->
 	      case mnesia:read({rabbitmq_consumer_process, QNameBin}) of
 		  [#rabbitmq_consumer_process{pid = Pid}] ->
-		      Pid ! {presence, JID, Priority},
+		      Pid ! {presence, JID, RKBin, Priority},
 		      ok;
 		  [] ->
 		      %% TODO: Link into supervisor
-		      Pid = spawn(?MODULE, consumer_init, [QNameBin, JID, Server, Priority]),
+		      Pid = spawn(?MODULE, consumer_init, [QNameBin, JID, RKBin, Server, Priority]),
 		      mnesia:write(#rabbitmq_consumer_process{queue = QNameBin, pid = Pid}),
 		      ok
 	      end
       end),
     ok.
 
-stop_consumer(QNameBin, JID, AllResources) ->
+stop_consumer(QNameBin, JID, RKBin, AllResources) ->
     mnesia:transaction(
       fun () ->
 	      case mnesia:read({rabbitmq_consumer_process, QNameBin}) of
 		  [#rabbitmq_consumer_process{pid = Pid}] ->
-		      Pid ! {unavailable, JID, AllResources},
+		      Pid ! {unavailable, JID, RKBin, AllResources},
 		      ok;
 		  [] ->
 		      ok
@@ -396,9 +412,9 @@ stop_consumer(QNameBin, JID, AllResources) ->
       end),
     ok.
 
-consumer_init(QNameBin, JID, Server, Priority) ->
-    ?INFO_MSG("**** starting consumer for queue ~p~njid ~p~npriority ~p",
-	      [QNameBin, JID, Priority]),
+consumer_init(QNameBin, JID, RKBin, Server, Priority) ->
+    ?INFO_MSG("**** starting consumer for queue ~p~njid ~p~npriority ~p rkbin ~p",
+	      [QNameBin, JID, Priority, RKBin]),
     ConsumerTag = rabbit_misc:binstring_guid("amq.xmpp"),
     rabbit_amqqueue:with(?QNAME(QNameBin),
 			 fun(Q) ->
@@ -409,7 +425,7 @@ consumer_init(QNameBin, JID, Server, Priority) ->
     ?MODULE:consumer_main(#consumer_state{lserver = Server,
 					  consumer_tag = ConsumerTag,
 					  queue = QNameBin,
-					  priorities = [{-Priority, JID}]}).
+					  priorities = [{-Priority, {JID, RKBin}}]}).
 
 jids_equal_upto_resource(J1, J2) ->
     jlib:jid_remove_resource(J1) == jlib:jid_remove_resource(J2).
@@ -417,18 +433,18 @@ jids_equal_upto_resource(J1, J2) ->
 consumer_main(#consumer_state{priorities = Priorities} = State) ->
     ?DEBUG("**** consumer ~p", [State]),
     receive
-	{unavailable, JID, AllResources} ->
+	{unavailable, JID, RKBin, AllResources} ->
 	    {atomic, NewState} =
 		mnesia:transaction(
 		  fun () ->
 			  NewPriorities =
 			      case AllResources of
 				  true ->
-				      lists:filter(fun ({_, J}) ->
+				      lists:filter(fun ({_, {J, _}}) ->
 							   not jids_equal_upto_resource(J, JID)
 						   end, Priorities);
 				  false ->
-				      lists:keydelete(JID, 2, Priorities)
+				      lists:keydelete({JID, RKBin}, 2, Priorities)
 			      end,
 			  case NewPriorities of
 			      [] ->
@@ -447,14 +463,18 @@ consumer_main(#consumer_state{priorities = Priorities} = State) ->
 		_ ->
 		    ?MODULE:consumer_main(NewState)
 	    end;
-	{presence, JID, Priority} ->
-	    NewPriorities = lists:keysort(1, keystore(JID, 2, Priorities, {-Priority, JID})),
+	{presence, JID, RKBin, Priority} ->
+	    NewPriorities = lists:keysort(1, keystore({JID, RKBin}, 2, Priorities,
+						      {-Priority, {JID, RKBin}})),
 	    ?MODULE:consumer_main(State#consumer_state{priorities = NewPriorities});
 	{deliver, _ConsumerTag, false, {_QName, _QPid, _Id, _Redelivered, Msg}} ->
 	    #basic_message{exchange_name = #resource{name = XNameBin},
+			   routing_key = RKBin,
 			   content = #content{payload_fragments_rev = PayloadRev}} = Msg,
-	    [{_, TopPriorityJID} | _] = Priorities,
-	    send_message(jlib:make_jid(binary_to_list(XNameBin), State#consumer_state.lserver, ""),
+	    [{_, {TopPriorityJID, _}} | _] = Priorities,
+	    send_message(jlib:make_jid(binary_to_list(XNameBin),
+				       State#consumer_state.lserver,
+				       binary_to_list(RKBin)),
 			 TopPriorityJID,
 			 "chat",
 			 binary_to_list(list_to_binary(lists:reverse(PayloadRev)))),
@@ -486,10 +506,10 @@ parse_command(Str) ->
 
 command_list() ->
     [{"help", "'help (command)'. Provides help for other commands."},
-     {"exchange.declare", "'exchange.declare (name)'. Creates a new AMQP fanout exchange."},
+     {"exchange.declare", "'exchange.declare (name) [-type (type)] [-transient]'. Creates a new AMQP exchange."},
      {"exchange.delete", "'exchange.delete (name)'. Deletes an AMQP exchange."},
-     {"bind", "'bind (exchange) (jid)'. Binds an exchange to another JID."},
-     {"unbind", "'unbind (exchange) (jid)'. Unbinds an exchange from another JID."},
+     {"bind", "'bind (exchange) (jid)'. Binds an exchange to another JID, with an empty routing key. 'bind (exchange) (jid) (key)'. Binds an exchange to another JID, with the given routing key."},
+     {"unbind", "'unbind (exchange) (jid)'. Unbinds an exchange from another JID, using an empty routing key. 'unbind (exchange) (jid) (key)'. Unbinds using the given routing key."},
      {"list", "'list'. List available exchanges.\nOR 'list (exchange)'. List subscribers to an exchange."}].
 
 command_names() ->
@@ -506,15 +526,8 @@ do_command(_To, _From, _RawCommand, {"help", [Cmd | _]}) ->
 	false ->
 	    {ok, "Unknown command ~p. Try plain old 'help'.", [Cmd]}
     end;
-do_command(_To, _From, _RawCommand, {"exchange.declare", [NameStr]}) ->
-    case NameStr of
-	"amq." ++ _ ->
-	    {ok, "Names may not start with 'amq.'."};
-	_ ->
-	    #exchange{} = rabbit_exchange:declare(?REALM, list_to_binary(NameStr),
-						  fanout, true, false, []),
-	    {ok, "Exchange ~p declared. Now you can subscribe to it.", [NameStr]}
-    end;
+do_command(_To, _From, _RawCommand, {"exchange.declare", [NameStr | Args]}) ->
+    do_command_declare(NameStr, Args, []);
 do_command(#jid{lserver = Server} = _To, _From, _RawCommand, {"exchange.delete", [NameStr]}) ->
     case NameStr of
 	"amq." ++ _ ->
@@ -526,24 +539,21 @@ do_command(#jid{lserver = Server} = _To, _From, _RawCommand, {"exchange.delete",
 	    {ok, "Exchange ~p deleted.", [NameStr]}
     end;
 do_command(#jid{lserver = Server} = _To, _From, _RawCommand, {"bind", [NameStr, JIDStr]}) ->
-    XJID = jlib:make_jid(NameStr, Server, ""),
-    QJID = jlib:string_to_jid(JIDStr),
-    send_presence(XJID, QJID, "subscribe"),
-    {ok, "Subscription process initiated. Good luck!"};
+    do_command_bind(Server, NameStr, JIDStr, "");
+do_command(#jid{lserver = Server} = _To, _From, _RawCommand, {"bind", [NameStr, JIDStr, RK]}) ->
+    do_command_bind(Server, NameStr, JIDStr, RK);
 do_command(#jid{lserver = Server} = _To, _From, _RawCommand, {"unbind", [NameStr, JIDStr]}) ->
-    XJID = jlib:make_jid(NameStr, Server, ""),
-    QJID = jlib:string_to_jid(JIDStr),
-    do_unsub(QJID, XJID, list_to_binary(NameStr), list_to_binary(JIDStr)),
-    {ok, "Unsubscription process initiated. Good luck!"};
+    do_command_unbind(Server, NameStr, JIDStr, "");
+do_command(#jid{lserver = Server} = _To, _From, _RawCommand, {"unbind", [NameStr, JIDStr, RK]}) ->
+    do_command_unbind(Server, NameStr, JIDStr, RK);
 do_command(_To, _From, _RawCommand, {"list", []}) ->
     {ok, "Exchanges available:~n~p",
-     [[binary_to_list(XN) || XN <- all_exchanges()]]};
+     [all_exchanges()]};
 do_command(_To, _From, _RawCommand, {"list", [NameStr]}) ->
-    {atomic, BoundQueues} = mnesia:transaction(fun () ->
-						       get_bound_queues(list_to_binary(NameStr))
-					       end),
+    {atomic, BindingDescriptions} =
+	mnesia:transaction(fun () -> get_bound_queues(list_to_binary(NameStr)) end),
     {ok, "Subscribers to ~p:~n~p",
-     [NameStr, [binary_to_list(QN) || QN <- BoundQueues]]};
+     [NameStr, [{binary_to_list(QN), binary_to_list(RK)} || {QN, RK} <- BindingDescriptions]]};
 do_command(_To, _From, RawCommand, _Parsed) ->
     {error,
      "I am a rabbitmq bot. Your command ~p was not understood.~n" ++
@@ -556,3 +566,50 @@ send_command_reply(From, To, {ok, ResponseIoList}) ->
     send_message(From, To, "chat", lists:flatten(ResponseIoList));
 send_command_reply(From, To, {error, ResponseIoList}) ->
     send_message(From, To, "chat", lists:flatten(ResponseIoList)).
+
+get_arg(ParsedArgs, Key, DefaultValue) ->
+    case lists:keysearch(Key, 1, ParsedArgs) of
+	{value, {_, V}} ->
+	    V;
+	false ->
+	    DefaultValue
+    end.
+
+do_command_declare(NameStr, ["-type", TypeStr | Rest], ParsedArgs) ->
+    do_command_declare(NameStr, Rest, [{type, TypeStr} | ParsedArgs]);
+do_command_declare(NameStr, ["-transient" | Rest], ParsedArgs) ->
+    do_command_declare(NameStr, Rest, [{durable, false} | ParsedArgs]);
+do_command_declare(NameStr, [], ParsedArgs) ->
+    case NameStr of
+	"amq." ++ _ ->
+	    {ok, "Names may not start with 'amq.'."};
+	_ ->
+	    case catch (rabbit_exchange:check_type(list_to_binary(get_arg(ParsedArgs,
+									  type,
+									  "fanout")))) of
+		{'EXIT', _} -> {error, "Bad exchange type."};
+		TypeAtom ->
+		    #exchange{} = rabbit_exchange:declare(?REALM,
+							  list_to_binary(NameStr),
+							  TypeAtom,
+							  get_arg(ParsedArgs, durable, true),
+							  false,
+							  []),
+		    {ok, "Exchange ~p of type ~p declared. Now you can subscribe to it.",
+		     [NameStr, TypeAtom]}
+	    end
+    end.
+
+do_command_bind(Server, NameStr, JIDStr, RK) ->
+    XJID = jlib:make_jid(NameStr, Server, RK),
+    QJID = jlib:string_to_jid(JIDStr),
+    send_presence(XJID, QJID, "subscribe"),
+    {ok, "Subscription process ~p <--> ~p initiated. Good luck!",
+     [jlib:jid_to_string(XJID), jlib:jid_to_string(QJID)]}.
+
+do_command_unbind(Server, NameStr, JIDStr, RK) ->
+    XJID = jlib:make_jid(NameStr, Server, RK),
+    QJID = jlib:string_to_jid(JIDStr),
+    do_unsub(QJID, XJID, list_to_binary(NameStr), list_to_binary(RK), list_to_binary(JIDStr)),
+    {ok, "Unsubscription process ~p <--> ~p initiated. Good luck!",
+     [jlib:jid_to_string(XJID), jlib:jid_to_string(QJID)]}.
