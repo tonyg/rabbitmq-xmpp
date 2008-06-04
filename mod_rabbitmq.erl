@@ -115,7 +115,7 @@ route(From, To, Packet) ->
     safe_route(shortcut, From, To, Packet).
 
 safe_route(ShortcutKind, From, To, Packet) ->
-    ?INFO_MSG("~p~n~p ->~n~p~n~p", [ShortcutKind, From, To, Packet]),
+    ?DEBUG("~p~n~p ->~n~p~n~p", [ShortcutKind, From, To, Packet]),
     case catch do_route(From, To, Packet) of
 	{'EXIT', Reason} ->
 	    ?ERROR_MSG("~p~nwhen processing: ~p",
@@ -212,7 +212,7 @@ do_route(From, To, {xmlelement, "message", _, _} = Packet) ->
     end,
     ok;
 do_route(_From, _To, _Packet) ->
-    ?INFO_MSG("**** DROPPED", []),
+    ?INFO_MSG("**** DROPPED~n~p~n~p~n~p", [_From, _To, _Packet]),
     ok.
 
 extract_priority(Packet) ->
@@ -273,10 +273,10 @@ unsub_all(XNameBin, ExchangeJID) ->
     ok.
 
 send_presence(From, To, "") ->
-    ?INFO_MSG("Sending sub reply of type ((available))~n~p -> ~p", [From, To]),
+    ?DEBUG("Sending sub reply of type ((available))~n~p -> ~p", [From, To]),
     ejabberd_router:route(From, To, {xmlelement, "presence", [], []});
 send_presence(From, To, TypeStr) ->
-    ?INFO_MSG("Sending sub reply of type ~p~n~p -> ~p", [TypeStr, From, To]),
+    ?DEBUG("Sending sub reply of type ~p~n~p -> ~p", [TypeStr, From, To]),
     ejabberd_router:route(From, To, {xmlelement, "presence", [{"type", TypeStr}], []}).
 
 send_message(From, To, TypeStr, BodyStr) ->
@@ -286,7 +286,7 @@ send_message(From, To, TypeStr, BodyStr) ->
 		{"to", jlib:jid_to_string(To)}],
 	       [{xmlelement, "body", [],
 		 [{xmlcdata, BodyStr}]}]},
-    ?INFO_MSG("Delivering ~p -> ~p~n~p", [From, To, XmlBody]),
+    ?DEBUG("Delivering ~p -> ~p~n~p", [From, To, XmlBody]),
     ejabberd_router:route(From, To, XmlBody).
 
 is_subscribed(XNameBin, QNameBin) ->
@@ -323,15 +323,15 @@ unbind_and_delete(XNameBin, QNameBin) ->
 	    ?DEBUG("... queue, binding or exchange not found. Ignoring", []),
 	    no_subscriptions_left;
 	{ok, 0} ->
-	    ?INFO_MSG("... and deleting", []),
+	    ?DEBUG("... and deleting", []),
 	    case rabbit_amqqueue:lookup(QName) of
 		{ok, Q} -> rabbit_amqqueue:delete(Q, false, false);
 		{error, not_found} -> ok
 	    end,
-	    ?INFO_MSG("here", []),
+	    ?DEBUG("... deletion complete.", []),
 	    no_subscriptions_left;
 	{ok, _PositiveCountOfBindings} ->
-	    ?INFO_MSG("... and leaving the queue alone", []),
+	    ?DEBUG("... and leaving the queue alone", []),
 	    subscriptions_remain
     end.
 
@@ -347,7 +347,7 @@ probe_queues(_Server, []) ->
     ok;
 probe_queues(Server, [#amqqueue{name = #resource{name = QNameBin},
 				binding_specs = Specs} | Rest]) ->
-    ?INFO_MSG("**** Probing ~p", [QNameBin]),
+    ?DEBUG("**** Probing ~p", [QNameBin]),
     case jlib:string_to_jid(binary_to_list(QNameBin)) of
 	error ->
 	    probe_queues(Server, Rest);
@@ -397,7 +397,8 @@ stop_consumer(QNameBin, JID, AllResources) ->
     ok.
 
 consumer_init(QNameBin, JID, Server, Priority) ->
-    ?INFO_MSG("**** starting consumer for ~p ~p ~p", [QNameBin, JID, Priority]),
+    ?INFO_MSG("**** starting consumer for queue ~p~njid ~p~npriority ~p",
+	      [QNameBin, JID, Priority]),
     ConsumerTag = rabbit_misc:binstring_guid("amq.xmpp"),
     rabbit_amqqueue:with(?QNAME(QNameBin),
 			 fun(Q) ->
@@ -414,7 +415,7 @@ jids_equal_upto_resource(J1, J2) ->
     jlib:jid_remove_resource(J1) == jlib:jid_remove_resource(J2).
 
 consumer_main(#consumer_state{priorities = Priorities} = State) ->
-    ?INFO_MSG("**** consumer ~p", [State]),
+    ?DEBUG("**** consumer ~p", [State]),
     receive
 	{unavailable, JID, AllResources} ->
 	    {atomic, NewState} =
@@ -440,7 +441,7 @@ consumer_main(#consumer_state{priorities = Priorities} = State) ->
 		  end),
 	    case NewState of
 		terminate ->
-		    ?INFO_MSG("**** terminating consumer ~p", [State#consumer_state.queue]),
+		    ?INFO_MSG("**** terminating consumer~n~p", [State#consumer_state.queue]),
 		    consumer_done(State#consumer_state{priorities = []}),
 		    done;
 		_ ->
@@ -459,7 +460,7 @@ consumer_main(#consumer_state{priorities = Priorities} = State) ->
 			 binary_to_list(list_to_binary(lists:reverse(PayloadRev)))),
 	    ?MODULE:consumer_main(State);
 	Other ->
-	    ?INFO_MSG("Consumer main ~p got ~p", [State#consumer_state.queue, Other]),
+	    ?INFO_MSG("Consumer main ~p got~n~p", [State#consumer_state.queue, Other]),
 	    ?MODULE:consumer_main(State)
     end.
 
