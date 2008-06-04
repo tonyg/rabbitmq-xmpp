@@ -211,9 +211,117 @@ do_route(From, To, {xmlelement, "message", _, _} = Packet) ->
 	    end
     end,
     ok;
+do_route(From, To, {xmlelement, "iq", _, Els0} = Packet) ->
+    Els = xml:remove_cdata(Els0),
+    IqId = xml:get_tag_attr_s("id", Packet),
+    case xml:get_tag_attr_s("type", Packet) of
+	"get" -> reply_iq(To, From, IqId, do_iq(get, From, To, Els));
+	"set" -> reply_iq(To, From, IqId, do_iq(set, From, To, Els));
+	Other -> ?WARNING_MSG("Unsolicited IQ of type ~p~n~p ->~n~p~n~p",
+			      [Other, From, To, Packet])
+    end,
+    ok;
 do_route(_From, _To, _Packet) ->
     ?INFO_MSG("**** DROPPED~n~p~n~p~n~p", [_From, _To, _Packet]),
     ok.
+
+reply_iq(From, To, IqId, {OkOrError, Els}) ->
+    ?DEBUG("IQ reply ~p~n~p ->~n~p~n~p", [IqId, From, To, Els]),
+    TypeStr = case OkOrError of
+		  ok ->
+		      "result";
+		  error ->
+		      "error"
+	      end,
+    Attrs = case IqId of
+		"" -> [{"type", TypeStr}];
+		_ -> [{"type", TypeStr}, {"id", IqId}]
+	    end,
+    ejabberd_router:route(From, To, {xmlelement, "iq", Attrs, Els}).
+
+do_iq(_GetOrSet, _From, _To, []) ->
+    {error, iq_error("modify", "bad-request", "Missing IQ element")};
+do_iq(_GetOrSet, _From, _To, [_, _ | _]) ->
+    {error, iq_error("modify", "bad-request", "Too many IQ elements")};
+do_iq(GetOrSet, From, To, [Elt]) ->
+    Xmlns = xml:get_tag_attr_s("xmlns", Elt),
+    do_iq1(GetOrSet, From, To, Xmlns, Elt).
+
+
+do_iq1(get, _From, To, "http://jabber.org/protocol/disco#info",
+       {xmlelement, "query", _, _}) ->
+    {XNameBin, RKBin} = jid_to_xname(To),
+    case XNameBin of
+	<<>> -> disco_info_module(To#jid.lserver);
+	_ -> disco_info_exchange(XNameBin, RKBin)
+    end;
+do_iq1(get, _From, To, "http://jabber.org/protocol/disco#items",
+       {xmlelement, "query", _, _}) ->
+    {XNameBin, RKBin} = jid_to_xname(To),
+    case XNameBin of
+	<<>> -> disco_items_module(To#jid.lserver);
+	_ -> disco_items_exchange(XNameBin, RKBin)
+    end;
+do_iq1(_GetOrSet, _From, _To, Xmlns, RequestElement) ->
+    ?DEBUG("Unimplemented IQ feature ~p~n~p", [Xmlns, RequestElement]),
+    {error, iq_error("cancel", "feature-not-implemented", "")}.
+
+disco_info_module(_Server) ->
+    {ok, disco_info_result([{"component", "generic", "AMQP router module"},
+			    {"component", "router", "AMQP router module"},
+			    {"component", "presence", "AMQP router module"},
+			    {"client", "bot", "RabbitMQ control interface"},
+			    {"gateway", "amqp", "AMQP gateway"},
+			    {"hierarchy", "branch", ""},
+			    "http://jabber.org/protocol/disco#info",
+			    "http://jabber.org/protocol/disco#items"])}.
+
+disco_info_exchange(XNameBin, _RKBin) ->
+    Tail = case rabbit_exchange:lookup(?XNAME(XNameBin)) of
+	       {ok, #exchange{type = TypeAtom}} ->
+		   ["amqp-exchange-" ++ atom_to_list(TypeAtom)];
+	       {error, not_found} ->
+		   []
+	   end,
+    {ok, disco_info_result([{"component", "bot", "AMQP Exchange"},
+			    {"hierarchy", "leaf", ""},
+			    "amqp-exchange"
+			    | Tail])}.
+
+disco_items_module(Server) ->
+    {ok, disco_items_result([jlib:make_jid(XNameStr, Server, "")
+			     || XNameStr <- all_exchange_names()])}.
+
+disco_items_exchange(_XNameStr, _RKBin) ->
+    {ok, disco_items_result([])}.
+
+disco_info_result(Pieces) ->
+    disco_info_result(Pieces, []).
+
+disco_info_result([], ConvertedPieces) ->
+    [{xmlelement, "query", [{"xmlns", "http://jabber.org/protocol/disco#info"}], ConvertedPieces}];
+disco_info_result([{Category, Type, Name} | Rest], ConvertedPieces) ->
+    disco_info_result(Rest, [{xmlelement, "identity", [{"category", Category},
+							      {"type", Type},
+							      {"name", Name}], []}
+				    | ConvertedPieces]);
+disco_info_result([Feature | Rest], ConvertedPieces) ->
+    disco_info_result(Rest, [{xmlelement, "feature", [{"var", Feature}], []}
+				    | ConvertedPieces]).
+
+disco_items_result(Pieces) ->
+    [{xmlelement, "query", [{"xmlns", "http://jabber.org/protocol/disco#items"}],
+      [{xmlelement, "item", [{"jid", jlib:jid_to_string(Jid)}], []} || Jid <- Pieces]}].
+
+iq_error(TypeStr, ConditionStr, MessageStr) ->
+    iq_error(TypeStr, ConditionStr, MessageStr, []).
+
+iq_error(TypeStr, ConditionStr, MessageStr, ExtraElements) ->
+    [{xmlelement, "error", [{"type", TypeStr}],
+      [{xmlelement, ConditionStr, [], []},
+       {xmlelement, "text", [{"xmlns", "urn:ietf:params:xml:ns:xmpp-stanzas"}],
+	[{xmlcdata, MessageStr}]}
+       | ExtraElements]}].
 
 extract_priority(Packet) ->
     case xml:get_subtag_cdata(Packet, "priority") of
@@ -339,6 +447,12 @@ unbind_and_delete(XNameBin, RKBin, QNameBin) ->
 	    ?DEBUG("... and leaving the queue alone", []),
 	    subscriptions_remain
     end.
+
+all_exchange_names() ->
+    [binary_to_list(XNameBin) ||
+	#exchange{name = #resource{name = XNameBin}}
+	    <- rabbit_exchange:list_vhost_exchanges(?VHOST),
+	XNameBin =/= <<>>].
 
 all_exchanges() ->
     [{binary_to_list(XNameBin),
