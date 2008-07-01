@@ -1,0 +1,305 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<title>RabbitMQ gateway module for ejabberd</title>
+<link rel="stylesheet" type="text/css" href="stylesheet.css" title="EDoc">
+</head>
+<body bgcolor="white">
+<div class="navbar"><a name="#navbar_top"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<h1>RabbitMQ gateway module for ejabberd</h1>
+<p>Copyright © 2008 Tony Garnock-Jones and LShift Ltd.
+</p>
+<p><b>Version:</b> 0.0.1
+</p>
+<p><b>Authors:</b> Tony Garnock-Jones (<a href="mailto:tonyg@lshift.net"><tt>tonyg@lshift.net</tt></a>), LShift Ltd. (<a href="mailto:query@lshift.net"><tt>query@lshift.net</tt></a>).</p>
+<p>RabbitMQ gateway for ejabberd.</p>
+
+<h3><a name="Introduction">Introduction</a></h3>
+
+<p>The <a href="mod_rabbitmq.html"><code>mod_rabbitmq</code></a> module implements an <a href="http://www.process-one.net/en/ejabberd/">ejabberd</a> extension
+module which gateways AMQP (as implemented by <a href="http://www.rabbitmq.com/">RabbitMQ</a>) to XMPP.</p>
+
+<p>By bridging between the two systems, we benefit from:</p>
+
+<ul>
+  <li>XMPP's internet-scale addressing and federation</li>
+  <li>XMPP's presence model</li>
+  <li>AMQP's store-and-forward capability</li>
+  <li>AMQP's routing and filtering (using <i>exchanges</i> and <i>bindings</i>)</li>
+</ul>
+
+<p>The current implementation is a very simple mapping between the two
+systems. Its simplicity keeps the code short, but only exposes a
+subset of AMQP features to the XMPP network, and vice versa.</p>
+
+<h3><a name="Basic_Operation">Basic Operation</a></h3>
+
+<p>The services provided by a mod_rabbitmq gateway are accessed by
+ordinary XMPP accounts registered with normal XMPP servers taking part
+in the global XMPP network, including</p>
+
+<ul>
+  <li>end-users running desktop XMPP IM clients</li>
+  <li>embedded services acting as XMPP bots</li>
+  <li>other gateways and network services</li>
+</ul>
+
+<p>The AMQP resources managed by the gateway are also accessible as usual
+via the AMQP protocol.</p>
+
+<div style="text-align: center;">
+<img src="xmpp-amqp-gateway.png" alt="Illustration of example AMQP/XMPP network">
+
+</div>
+
+<p>In the example illustration above,</p>
+
+<ul>
+
+  <li>Both <tt>romeo@montague.net</tt> and <tt>juliet@capulet.com</tt>
+  have subscribed to presence announcements for (i.e. become IM
+  buddies with) <tt>chatroom@dev.rabbitmq.com</tt>.</li>
+
+  <li>XMPP messages sent to <tt>chatroom@dev.rabbitmq.com</tt> are
+  routed through the AMQP "chatroom" exchange to any bound queues --
+  including those of any XMPP JIDs that are buddies with the AMQP
+  exchange.</li>
+
+  <li>Any AMQP messages sent to the "chatroom" exchange are of course
+  routed similarly.</li>
+
+  <li>In the diagram, <tt>juliet</tt> is online, but <tt>romeo</tt> is
+  offline (unavailable). The system is therefore running a consumer
+  process which consumes from <tt>juliet</tt>'s queue, sending her the
+  messages it contains. The queue for <tt>romeo</tt> continues to
+  buffer messages until he is next online.</li>
+
+</ul>
+
+<h3><a name="JIDs_Map_to_Exchanges">JIDs Map to Exchanges</a></h3>
+
+<p>Each exchange in the AMQP virtual host is given a JID. For example,
+the JID "<tt>test@dev.rabbitmq.com</tt>" resolves to the exchange
+named "<tt>test</tt>" within the virtual host that the gateway
+represents.</p>
+
+<p>Queues are not currently given JIDs; instead, they're created and
+deleted on demand by the action of either direct AMQP commands, or by
+XMPP subscription management (see below).</p>
+
+<p>Messages sent via XMPP to an exchange's JID are routed and delivered
+as per normal AMQP rules.</p>
+
+<h3><a name="Presence_Subscription_Controls_Queue_Creation_and_Binding">Presence Subscription Controls Queue Creation and Binding</a></h3>
+
+<p>Whenever a JID in the global XMPP network subscribes to presence
+notifications of an exchange JID managed by the gateway, the exchange
+subscribes back. Once the subscription process is complete, a queue is
+created for the remote JID (if one does not already exist), and the
+queue is then bound to the exchange. For example:</p>
+
+<ul>
+
+  <li><tt>romeo@montague.net</tt> knows that on
+  <tt>dev.rabbitmq.com</tt> there's an exchange called
+  <tt>test</tt>.</li>
+
+  <li>He uses his XMPP client to add <tt>test@dev.rabbitmq.com</tt> to
+  his buddy list.</li>
+
+  <li>The mod_rabbitmq gateway at <tt>dev.rabbitmq.com</tt>
+  effectively adds <tt>romeo@montague.net</tt> to the roster for
+  the <tt>test</tt> exchange.</li>
+
+  <li>The gateway then creates a local queue named
+  "<tt>romeo@montague.net</tt>", and binds it to the "test"
+  exchange.</li>
+
+</ul>
+
+<p>If <tt>romeo</tt> later subscribes to another exchange managed by the
+same gateway, the same queue is reused. Deliveries for each exchange
+subscribed to are all placed on the single queue responsible for the
+remote JID "<tt>romeo@montague.net</tt>".</p>
+
+<p>If <tt>romeo</tt> later unsubscribes from all exchanges managed by the
+gateway, so that no subscriptions/bindings are left for his queue, the
+queue is deleted.</p>
+
+<h3><a name="Presence_Controls_Consumers_and_Deliveries">Presence Controls Consumers and Deliveries</a></h3>
+
+<p>Because the gateway has subscribed to <tt>romeo</tt>'s presence
+status, it will hear about his presence changes. When he comes online,
+an AMQP consumer is started, which reads from his queue, delivering
+each queued-up message as an instant message. When he goes offline,
+the consumer is stopped, and messages are buffered in the AMQP queue
+as usual for later consumption.</p>
+
+<h3><a name="JID_Resources_are_used_as_Routing_Keys_and_Binding_Patterns">JID Resources are used as Routing Keys and Binding Patterns</a></h3>
+
+<p>XMPP's JIDs have three parts: <tt>name@dns.host/resource</tt>.</p>
+
+<ul>
+
+  <li><tt>name</tt> is a local part, unique within a server.</li>
+
+  <li><tt>dns.host</tt> is a globally-unique DNS name, used to
+  identify a server.</li>
+
+  <li><tt>resource</tt> is an (optional!) sub-name for identifying any
+  one of a number of endpoints that are controlled by and represent
+  <tt>name@dns.host</tt>.</li>
+
+</ul>
+
+<p>In the current AMQP-to-XMPP binding, the <tt>resource</tt> part of the
+JID is used as the <i>AMQP routing key</i> when delivering messages,
+and the <i>AMQP binding pattern</i> when subscribing and
+unsubscribing.</p>
+
+<p>This means that:</p>
+
+<ul>
+
+  <li>If <tt>romeo@montague.net</tt> subscribes to
+  <tt>amq.topic@dev.rabbitmq.com/*.ibm</tt>, he will receive messages
+  that have AMQP routing key "nyse.ibm" or "lse.ibm", but not
+  "ibm.foo" or "nyse.msft", because <tt>amq.topic</tt> is an AMQP
+  topic exchange.</li>
+
+  <li>The other kinds of exchange -- direct and fanout -- also use the
+  <tt>resource</tt> part of the subscribed-to JID as a binding key,
+  filtering as per their definition in the AMQP specification.</li>
+
+  <li><tt>amq.topic</tt> messages routed to <tt>romeo</tt> will appear
+  to come from <tt>amq.topic@dev.rabbitmq.com/nyse.ibm</tt>,
+  <tt>amq.topic@dev.rabbitmq.com/lse.ibm</tt>, etc; the AMQP
+  routing-key of the message being delivered is placed in the
+  <tt>resource</tt> part of the sending JID.</li>
+
+  <li>XMPP messages sent to <tt>exchange@dev.rabbitmq.com/foo</tt> are
+  delivered into the AMQP layer with exchange name "<tt>exchange</tt>"
+  and routing key "<tt>foo</tt>".</li>
+
+</ul>
+
+<h3><a name="Support_for_XMPP_Discovery">Support for XMPP Discovery</a></h3>
+
+<p>The gateway implements the <a href="http://www.xmpp.org/extensions/xep-0030.html">XMPP Service
+Discovery</a> protocol to permit discovery of exposed exchanges.</p>
+
+<h3><a name="Creating,_Listing_and_Deleting_Exchanges">Creating, Listing and Deleting Exchanges</a></h3>
+
+<p>The current implementation provides an XMPP bot which speaks a
+high-level command-line based language for creating, listing and
+deleting exchanges. Given a mod_rabbitmq instance responsible for
+<tt>dev.rabbitmq.com</tt>, the following interaction, between the two
+JIDs <tt>romeo@montague.net</tt> and <tt>dev.rabbitmq.com</tt>
+(note: it is valid to have a JID that is just a DNS name, without a
+leading "name@" part!) shows the instance's bot in action:</p>
+
+<pre>
+[18:12:05] &lt;romeo&gt; help
+[18:12:06] &lt;dev.rabbitmq.com&gt; Here is a list of commands. Use 'help (command)' to get details on any one.
+["help","exchange.declare","exchange.delete","bind","unbind","list"]
+[18:12:12] &lt;romeo&gt; list
+[18:12:12] &lt;dev.rabbitmq.com&gt; Exchanges available:
+[{"mandatoryTestExchange",fanout,transient,[]},
+ {"canvaspainter",fanout,durable,[]},
+ {"sam",fanout,transient,[]},
+ {"amq.rabbitmq.log",topic,durable,[]},
+ {"rabbit",fanout,durable,[]},
+ {"test",fanout,durable,[]},
+ {"test completion",fanout,transient,[]},
+ {"amq.topic",topic,durable,[]},
+ {"amq.direct",direct,durable,[]},
+ {"amq.fanout",fanout,durable,[]}]
+[18:13:05] &lt;romeo&gt; help exchange.declare
+[18:13:05] &lt;dev.rabbitmq.com&gt; 'exchange.declare (name) [-type (type)] [-transient]'. Creates a new AMQP exchange.
+[18:13:14] &lt;romeo&gt; exchange.declare foo -type fanout
+[18:13:14] &lt;dev.rabbitmq.com&gt; Exchange "foo" of type fanout declared. Now you can subscribe to it.
+[18:13:19] &lt;romeo&gt; help exchange.delete
+[18:13:19] &lt;dev.rabbitmq.com&gt; 'exchange.delete (name)'. Deletes an AMQP exchange.
+[18:13:23] &lt;romeo&gt; exchange.delete foo
+[18:13:23] &lt;dev.rabbitmq.com&gt; Exchange "foo" deleted.
+</pre>
+
+<h3><a name="Compiling_the_gateway">Compiling the gateway</a></h3>
+
+<p>To compile the gateway,</p>
+
+<ol>
+
+  <li><a href="http://www.rabbitmq.com/download.html">Download</a>, <a href="http://www.rabbitmq.com/build.html">compile</a> and install
+  the RabbitMQ server, so that it is available in
+  <tt>/usr/lib/erlang/lib/</tt> (path may vary by operating system)
+  just as any other Erlang library.</li>
+
+  <li><a href="http://www.process-one.net/en/ejabberd/downloads">Download</a>
+  (or check out from subversion) ejabberd.</li>
+
+  <li>Copy (or symlink) <tt>mod_rabbitmq.erl</tt> into your
+  <tt>ejabberd/src</tt> directory, so that it exists alongside such
+  ejabberd source files as <tt>mod_echo.erl</tt>,
+  <tt>mod_offline.erl</tt> etc.</li>
+
+  <li>Compile and install the ejabberd server from the source
+  tree.</li>
+
+</ol>
+
+<p>Once ejabberd is compiled and installed, configure it as you usually
+would, and proceed with the next section.</p>
+
+<h3><a name="Configuring_a_mod_rabbitmq_Instance">Configuring a mod_rabbitmq Instance</a></h3>
+
+<p>Each mod_rabbitmq instance in a running ejabberd maps to a single AMQP
+"virtual host" running within a RabbitMQ instance: a collection of
+exchanges, queues, and the bindings between them. The instance is
+given responsibility for a single DNS domain: for example, JIDs ending
+with <tt>@dev.rabbitmq.com</tt> map to a mod_rabbitmq instance.</p>
+
+<p>Currently, only a single mod_rabbitmq can run within each ejabberd
+node.</p>
+
+<p>To enable the gateway, decide on the DNS name that is to map to the
+AMQP virtual host, and edit <tt>/etc/ejabberd/ejabberd.cfg</tt> to
+include a <tt>{mod_rabbitmq,[]}</tt> stanza in its <tt>modules</tt>
+section:</p>
+
+<pre>
+{modules,
+ [
+  {mod_adhoc,    []},
+  ...
+  <b>{mod_rabbitmq, []},</b>
+  ...
+  {mod_version,  []}
+ ]}.
+</pre>
+
+<h3><a name="Limitations">Limitations</a></h3>
+
+<p>The current implementation is largely a proof-of-concept.</p>
+
+<p>There is no support for the XMPP Multi-User Chat protocol.</p>
+
+<p>There is no support for the XMPP Pub-Sub protocol.</p>
+
+<p>A more sophisticated mapping would give JIDs to queues as well as exchanges.</p>
+
+<p>Only plain-text IM-style messages and chats are routed across the
+gateway at present. Other media types are not supported.</p>
+
+<p>There is no support for message-receipt acknowledgement (AMQP's
+"basic.ack" operation).</p>
+
+The command protocol (understood by the XMPP bot built in to the
+gateway) is ridiculous. It should be mechanically generated from the
+AMQP specification itself (possibly augmented with extension methods).
+
+<hr>
+<div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<p><i>Generated by EDoc</i></p>
+</body>
+</html>
