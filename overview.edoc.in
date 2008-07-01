@@ -10,8 +10,8 @@
 == Introduction ==
 
 The {@link mod_rabbitmq} module implements an <a
-href="http://www.ejabberd.im/">ejabberd</a> extension module which
-gateways AMQP (as implemented by <a
+href="http://www.process-one.net/en/ejabberd/">ejabberd</a> extension
+module which gateways AMQP (as implemented by <a
 href="http://www.rabbitmq.com/">RabbitMQ</a>) to XMPP.
 
 By bridging between the two systems, we benefit from:
@@ -121,7 +121,16 @@ If <tt>romeo</tt> later unsubscribes from all exchanges managed by the
 gateway, so that no subscriptions/bindings are left for his queue, the
 queue is deleted.
 
-== JID Resources are used as Routing Keys ==
+== Presence Controls Consumers and Deliveries ==
+
+Because the gateway has subscribed to <tt>romeo</tt>'s presence
+status, it will hear about his presence changes. When he comes online,
+an AMQP consumer is started, which reads from his queue, delivering
+each queued-up message as an instant message. When he goes offline,
+the consumer is stopped, and messages are buffered in the AMQP queue
+as usual for later consumption.
+
+== JID Resources are used as Routing Keys and Binding Patterns ==
 
 XMPP's JIDs have three parts: <tt>name@dns.host/resource</tt>.
 
@@ -143,16 +152,37 @@ JID is used as the <i>AMQP routing key</i> when delivering messages,
 and the <i>AMQP binding pattern</i> when subscribing and
 unsubscribing.
 
-This means that (...)
+This means that:
 
-== Presence Controls Consumers and Deliveries ==
+<ul>
 
-Because the gateway has subscribed to <tt>romeo</tt>'s presence
-status, it will hear about his presence changes. When he comes online,
-an AMQP consumer is started, which reads from his queue, delivering
-each queued-up message as an instant message. When he goes offline,
-the consumer is stopped, and messages are buffered in the AMQP queue
-as usual for later consumption.
+  <li>If <tt>romeo@montague.net</tt> subscribes to
+  <tt>amq.topic@dev.rabbitmq.com/*.ibm</tt>, he will receive messages
+  that have AMQP routing key "nyse.ibm" or "lse.ibm", but not
+  "ibm.foo" or "nyse.msft", because <tt>amq.topic</tt> is an AMQP
+  topic exchange.</li>
+
+  <li>The other kinds of exchange -- direct and fanout -- also use the
+  <tt>resource</tt> part of the subscribed-to JID as a binding key,
+  filtering as per their definition in the AMQP specification.</li>
+
+  <li><tt>amq.topic</tt> messages routed to <tt>romeo</tt> will appear
+  to come from <tt>amq.topic@dev.rabbitmq.com/nyse.ibm</tt>,
+  <tt>amq.topic@dev.rabbitmq.com/lse.ibm</tt>, etc; the AMQP
+  routing-key of the message being delivered is placed in the
+  <tt>resource</tt> part of the sending JID.</li>
+
+  <li>XMPP messages sent to <tt>exchange@dev.rabbitmq.com/foo</tt> are
+  delivered into the AMQP layer with exchange name "<tt>exchange</tt>"
+  and routing key "<tt>foo</tt>".</li>
+
+</ul>
+
+== Support for XMPP Discovery ==
+
+The gateway implements the <a
+href="http://www.xmpp.org/extensions/xep-0030.html">XMPP Service
+Discovery</a> protocol to permit discovery of exposed exchanges.
 
 == Creating, Listing and Deleting Exchanges ==
 
@@ -190,6 +220,35 @@ leading "name@" part!) shows the instance's bot in action:
 [18:13:23] &lt;dev.rabbitmq.com&gt; Exchange "foo" deleted.
 </pre>
 
+== Compiling the gateway ==
+
+To compile the gateway,
+
+<ol>
+
+  <li><a href="http://www.rabbitmq.com/download.html">Download</a>, <a
+  href="http://www.rabbitmq.com/build.html">compile</a> and install
+  the RabbitMQ server, so that it is available in
+  <tt>/usr/lib/erlang/lib/</tt> (path may vary by operating system)
+  just as any other Erlang library.</li>
+
+  <li><a
+  href="http://www.process-one.net/en/ejabberd/downloads">Download</a>
+  (or check out from subversion) ejabberd.</li>
+
+  <li>Copy (or symlink) <tt>mod_rabbitmq.erl</tt> into your
+  <tt>ejabberd/src</tt> directory, so that it exists alongside such
+  ejabberd source files as <tt>mod_echo.erl</tt>,
+  <tt>mod_offline.erl</tt> etc.</li>
+
+  <li>Compile and install the ejabberd server from the source
+  tree.</li>
+
+</ol>
+
+Once ejabberd is compiled and installed, configure it as you usually
+would, and proceed with the next section.
+
 == Configuring a mod_rabbitmq Instance ==
 
 Each mod_rabbitmq instance in a running ejabberd maps to a single AMQP
@@ -201,7 +260,38 @@ with <tt>@dev.rabbitmq.com</tt> map to a mod_rabbitmq instance.
 Currently, only a single mod_rabbitmq can run within each ejabberd
 node.
 
-== Media Types ==
+To enable the gateway, decide on the DNS name that is to map to the
+AMQP virtual host, and edit <tt>/etc/ejabberd/ejabberd.cfg</tt> to
+include a <tt>{mod_rabbitmq,[]}</tt> stanza in its <tt>modules</tt>
+section:
 
-== Reliable Delivery ==
+<pre>
+{modules,
+ [
+  {mod_adhoc,    []},
+  ...
+  <b>{mod_rabbitmq, []},</b>
+  ...
+  {mod_version,  []}
+ ]}.
+</pre>
 
+== Limitations ==
+
+The current implementation is largely a proof-of-concept.
+
+There is no support for the XMPP Multi-User Chat protocol.
+
+There is no support for the XMPP Pub-Sub protocol.
+
+A more sophisticated mapping would give JIDs to queues as well as exchanges.
+
+Only plain-text IM-style messages and chats are routed across the
+gateway at present. Other media types are not supported.
+
+There is no support for message-receipt acknowledgement (AMQP's
+"basic.ack" operation).
+
+The command protocol (understood by the XMPP bot built in to the
+gateway) is ridiculous. It should be mechanically generated from the
+AMQP specification itself (possibly augmented with extension methods).

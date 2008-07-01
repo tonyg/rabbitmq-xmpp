@@ -23,6 +23,11 @@
 %%---------------------------------------------------------------------------
 %%
 %% @doc RabbitMQ gateway module for ejabberd.
+%%
+%% All of the exposed functions of this module are private to the
+%% implementation. See the <a
+%% href="overview-summary.html">overview</a> page for more
+%% information.
 
 -module(mod_rabbitmq).
 
