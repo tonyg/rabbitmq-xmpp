@@ -236,7 +236,7 @@ To compile the gateway,
   href="http://www.process-one.net/en/ejabberd/downloads">Download</a>
   (or check out from subversion) ejabberd.</li>
 
-  <li>Copy (or symlink) <tt>mod_rabbitmq.erl</tt> into your
+  <li>Copy (or symlink) <tt>src/mod_rabbitmq.erl</tt> into your
   <tt>ejabberd/src</tt> directory, so that it exists alongside such
   ejabberd source files as <tt>mod_echo.erl</tt>,
   <tt>mod_offline.erl</tt> etc.</li>
