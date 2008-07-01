@@ -14,7 +14,11 @@ doc:
 	mkdir ./doc
 
 .PHONY: documentation
-documentation: doc/overview.edoc doc/xmpp-amqp-gateway.png
+documentation: \
+		doc/overview.edoc \
+		doc/xmpp-amqp-gateway.png \
+		doc/whole-network-1.png \
+		doc/whole-network-2.png
 	$(MAKE) doc
 	erl -noshell \
 		-eval 'edoc:application(mod_rabbitmq, ".", [])' \

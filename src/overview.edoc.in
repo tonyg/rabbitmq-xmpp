@@ -9,6 +9,11 @@
 
 == Introduction ==
 
+<div style="text-align: center;">
+<img src="whole-network-1.png" alt="Gateway in relation to ejabberd and RabbitMQ">
+</img>
+</div>
+
 The {@link mod_rabbitmq} module implements an <a
 href="http://www.process-one.net/en/ejabberd/">ejabberd</a> extension
 module which gateways AMQP (as implemented by <a
