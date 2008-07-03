@@ -58,14 +58,18 @@ In the example illustration above,
 
   <li>Both <tt>romeo@montague.net</tt> and <tt>juliet@capulet.com</tt>
   have subscribed to presence announcements for (i.e. become IM
-  buddies with) <tt>chatroom@dev.rabbitmq.com</tt>.</li>
+  buddies with) <tt>pubsub@dev.rabbitmq.com</tt>.</li>
 
-  <li>XMPP messages sent to <tt>chatroom@dev.rabbitmq.com</tt> are
-  routed through the AMQP "chatroom" exchange to any bound queues --
+  <li>Note that "<tt>pubsub</tt>" is just an example exchange name!
+  Any exchange name is possible. AMQP is a bit different to both XMPP
+  multi-user chat and XMPP pub-sub; see also "Limitations" below.</li>
+
+  <li>XMPP messages sent to <tt>pubsub@dev.rabbitmq.com</tt> are
+  routed through the AMQP "pubsub" exchange to any bound queues --
   including those of any XMPP JIDs that are buddies with the AMQP
   exchange.</li>
 
-  <li>Any AMQP messages sent to the "chatroom" exchange are of course
+  <li>Any AMQP messages sent to the "pubsub" exchange are of course
   routed similarly.</li>
 
   <li>In the diagram, <tt>juliet</tt> is online, but <tt>romeo</tt> is
