@@ -2,8 +2,8 @@
 %% Based on ejabberd's mod_echo.erl
 %%---------------------------------------------------------------------------
 %% @author Tony Garnock-Jones <tonyg@lshift.net>
-%% @author LShift Ltd. <query@lshift.net>
-%% @copyright 2008 Tony Garnock-Jones and LShift Ltd.
+%% @author Rabbit Technologies Ltd. <info@rabbitmq.com>
+%% @copyright 2008 Tony Garnock-Jones and Rabbit Technologies Ltd.
 %% @license
 %%
 %% This program is free software; you can redistribute it and/or
