@@ -55,12 +55,14 @@
 -define(PROCNAME, ejabberd_mod_rabbitmq).
 -define(TABLENAME, ?PROCNAME).
 
+%% @hidden
 start_link(Host, Opts) ->
     Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
     mnesia:create_table(rabbitmq_consumer_process,
 			[{attributes, record_info(fields, rabbitmq_consumer_process)}]),
     gen_server:start_link({local, Proc}, ?MODULE, [Host, Opts], []).
 
+%% @hidden
 start(Host, Opts) ->
     Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
     ChildSpec = {Proc,
@@ -71,6 +73,7 @@ start(Host, Opts) ->
 		 [?MODULE]},
     supervisor:start_child(ejabberd_sup, ChildSpec).
 
+%% @hidden
 stop(Host) ->
     Proc = gen_mod:get_module_proc(Host, ?PROCNAME),
     gen_server:call(Proc, stop),
@@ -79,6 +82,7 @@ stop(Host) ->
 
 %%---------------------------------------------------------------------------
 
+%% @hidden
 init([Host, Opts]) ->
     case catch rabbit_mnesia:create_tables() of
 	{error, {table_creation_failed, _, _, {already_exists, _}}} ->
@@ -95,27 +99,33 @@ init([Host, Opts]) ->
 
     {ok, #state{host = MyHost}}.
 
+%% @hidden
 handle_call(stop, _From, State) ->
     {stop, normal, ok, State}.
 
+%% @hidden
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @hidden
 handle_info({route, From, To, Packet}, State) ->
     safe_route(non_shortcut, From, To, Packet),
     {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @hidden
 terminate(_Reason, State) ->
     ejabberd_router:unregister_route(State#state.host),
     ok.
 
+%% @hidden
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%---------------------------------------------------------------------------
 
+%% @hidden
 route(From, To, Packet) ->
     safe_route(shortcut, From, To, Packet).
 
@@ -529,6 +539,7 @@ stop_consumer(QNameBin, JID, RKBin, AllResources) ->
       end),
     ok.
 
+%% @hidden
 consumer_init(QNameBin, JID, RKBin, Server, Priority) ->
     ?INFO_MSG("**** starting consumer for queue ~p~njid ~p~npriority ~p rkbin ~p",
 	      [QNameBin, JID, Priority, RKBin]),
@@ -547,6 +558,7 @@ consumer_init(QNameBin, JID, RKBin, Server, Priority) ->
 jids_equal_upto_resource(J1, J2) ->
     jlib:jid_remove_resource(J1) == jlib:jid_remove_resource(J2).
 
+%% @hidden
 consumer_main(#consumer_state{priorities = Priorities} = State) ->
     ?DEBUG("**** consumer ~p", [State]),
     receive
