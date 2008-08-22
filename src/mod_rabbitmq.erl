@@ -595,7 +595,7 @@ consumer_main(#consumer_state{priorities = Priorities} = State) ->
 	    NewPriorities = lists:keysort(1, keystore({JID, RKBin}, 2, Priorities,
 						      {-Priority, {JID, RKBin}})),
 	    ?MODULE:consumer_main(State#consumer_state{priorities = NewPriorities});
-	{deliver, _ConsumerTag, false, {_QName, _QPid, _Id, _Redelivered, Msg}} ->
+	{deliver, _ConsumerTag, false, {_QName, QPid, _Id, _Redelivered, Msg}} ->
 	    #basic_message{exchange_name = #resource{name = XNameBin},
 			   routing_key = RKBin,
 			   content = #content{payload_fragments_rev = PayloadRev}} = Msg,
@@ -606,6 +606,7 @@ consumer_main(#consumer_state{priorities = Priorities} = State) ->
 			 TopPriorityJID,
 			 "chat",
 			 binary_to_list(list_to_binary(lists:reverse(PayloadRev)))),
+	    rabbit_amqqueue:notify_sent(QPid, self()),
 	    ?MODULE:consumer_main(State);
 	Other ->
 	    ?INFO_MSG("Consumer main ~p got~n~p", [State#consumer_state.queue, Other]),
