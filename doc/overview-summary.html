@@ -199,25 +199,29 @@ Discovery</a> protocol to permit discovery of exposed exchanges.</p>
 
 <h3><a name="Interacting_with_the_RabbitMQ-XMPP_Bot">Interacting with the RabbitMQ-XMPP Bot</a></h3>
 
-<p>The current implementation provides an XMPP bot which speaks a
-high-level command-line based language for creating, listing and
-deleting exchanges. If a mod_rabbitmq instance is configured to be
-responsible for the JIDs within the domain <tt>dev.rabbitmq.com</tt>,
-then the associated bot will be addressable at the <b>bare JID</b>
-<tt>dev.rabbitmq.com</tt> itself.</p>
+<p>Since the "name" part of a JID is technically optional, the current
+implementation makes use of this by reserving bare, domain-only JIDs
+for use in addressing a built-in XMPP bot that controls exchange
+creation and deletion.</p>
 
-<p>(Recall that JIDs, in general, are of the form "node@domain/resource",
-and both the "node@" and "/resource" parts are optional. It's unusual
-to have a chat-capable actor such as the RabbitMQ-XMPP bot assigned a
-bare (domain-only) JID, but it does work, and it neatly avoids the
-problem of needing reserved node names that could otherwise arise.)</p>
+<p>The bot speaks a high-level command-line based language for creating,
+listing and deleting exchanges. If, for example, a mod_rabbitmq
+instance is configured to be responsible for the JIDs within the
+domain <tt>dev.rabbitmq.com</tt>, then the associated bot will be
+addressable at the bare JID <tt>dev.rabbitmq.com</tt> itself.</p>
+
+<p>The reason we took the unusual step of giving a chat-capable actor a
+bare JID address was that it neatly avoids the need to reserve special
+names that would otherwise arise. For example, we might have named the
+bot "bot@dev.rabbitmq.com", but what would then have happened if a
+user created an AMQP exchange named "bot"?</p>
 
 <h3><a name="Creating,_Listing_and_Deleting_Exchanges">Creating, Listing and Deleting Exchanges</a></h3>
 
 <p>Given a mod_rabbitmq instance responsible for
 <tt>dev.rabbitmq.com</tt>, the following interaction, between the two
 JIDs <tt>romeo@montague.net</tt> and <tt>dev.rabbitmq.com</tt> (note
-again the bare JID, without a "node@" part!) shows the instance's bot
+again the bare JID, without a "name@" part!) shows the instance's bot
 in action:</p>
 
 <pre>
