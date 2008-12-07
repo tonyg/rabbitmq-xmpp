@@ -193,15 +193,28 @@ The gateway implements the <a
 href="http://www.xmpp.org/extensions/xep-0030.html">XMPP Service
 Discovery</a> protocol to permit discovery of exposed exchanges.
 
-== Creating, Listing and Deleting Exchanges ==
+== Interacting with the RabbitMQ-XMPP Bot ==
 
 The current implementation provides an XMPP bot which speaks a
 high-level command-line based language for creating, listing and
-deleting exchanges. Given a mod_rabbitmq instance responsible for
+deleting exchanges. If a mod_rabbitmq instance is configured to be
+responsible for the JIDs within the domain <tt>dev.rabbitmq.com</tt>,
+then the associated bot will be addressable at the <b>bare JID</b>
+<tt>dev.rabbitmq.com</tt> itself.
+
+(Recall that JIDs, in general, are of the form "node@domain/resource",
+and both the "node@" and "/resource" parts are optional. It's unusual
+to have a chat-capable actor such as the RabbitMQ-XMPP bot assigned a
+bare (domain-only) JID, but it does work, and it neatly avoids the
+problem of needing reserved node names that could otherwise arise.)
+
+== Creating, Listing and Deleting Exchanges ==
+
+Given a mod_rabbitmq instance responsible for
 <tt>dev.rabbitmq.com</tt>, the following interaction, between the two
-JIDs <tt>romeo@montague.net</tt> and <tt>dev.rabbitmq.com</tt>
-(note: it is valid to have a JID that is just a DNS name, without a
-leading "name@" part!) shows the instance's bot in action:
+JIDs <tt>romeo@montague.net</tt> and <tt>dev.rabbitmq.com</tt> (note
+again the bare JID, without a "node@" part!) shows the instance's bot
+in action:
 
 <pre>
 [18:12:05] &lt;romeo&gt; help
