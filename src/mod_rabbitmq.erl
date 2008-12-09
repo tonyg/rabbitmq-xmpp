@@ -3,7 +3,8 @@
 %%---------------------------------------------------------------------------
 %% @author Tony Garnock-Jones <tonyg@lshift.net>
 %% @author Rabbit Technologies Ltd. <info@rabbitmq.com>
-%% @copyright 2008 Tony Garnock-Jones and Rabbit Technologies Ltd.
+%% @author LShift Ltd. <query@lshift.net>
+%% @copyright 2008 Tony Garnock-Jones and Rabbit Technologies Ltd.; Copyright © 2008-2009 Tony Garnock-Jones and LShift Ltd.
 %% @license
 %%
 %% This program is free software; you can redistribute it and/or
