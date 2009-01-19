@@ -415,18 +415,13 @@ send_message(From, To, TypeStr, BodyStr) ->
 
 is_subscribed(XNameBin, RKBin, QNameBin) ->
     XName = ?XNAME(XNameBin),
-    case rabbit_amqqueue:lookup(?QNAME(QNameBin)) of
-	{ok, #amqqueue{binding_specs = Specs}} ->
-	    lists:any(fun 
-			  (#binding_spec{exchange_name = N, routing_key = R})
-			    when N == XName andalso R == RKBin ->
-			      true;
-			  (_) ->
-			      false
-		      end, Specs);
-	{error, not_found} ->
-	    false
-    end.
+    lists:any(fun 
+		  ({N, R, _Arguments})
+		  when N == XName andalso R == RKBin ->
+		      true;
+		  (_) ->
+		      false
+	      end, rabbit_exchange:list_queue_bindings(?QNAME(QNameBin))).
 
 check_and_bind(XNameBin, RKBin, QNameBin) ->
     ?DEBUG("Checking ~p ~p ~p", [XNameBin, RKBin, QNameBin]),
@@ -485,26 +480,23 @@ all_exchanges() ->
 	XNameBin =/= <<>>].
 
 probe_queues(Server) ->
-    probe_queues(Server, rabbit_amqqueue:list_vhost_queues(?VHOST)).
+    probe_queues(Server, rabbit_amqqueue:list(?VHOST)).
 
 probe_queues(_Server, []) ->
     ok;
-probe_queues(Server, [#amqqueue{name = #resource{name = QNameBin},
-				binding_specs = Specs} | Rest]) ->
+probe_queues(Server, [#amqqueue{name = QName = #resource{name = QNameBin}} | Rest]) ->
     ?DEBUG("**** Probing ~p", [QNameBin]),
     case jlib:string_to_jid(binary_to_list(QNameBin)) of
 	error ->
 	    probe_queues(Server, Rest);
 	JID ->
-	    probe_bindings(Server, JID, Specs),
+	    probe_bindings(Server, JID, rabbit_exchange:list_queue_bindings(QName)),
 	    probe_queues(Server, Rest)
     end.
 
 probe_bindings(_Server, _JID, []) ->
     ok;
-probe_bindings(Server, JID,
-	       [#binding_spec{exchange_name = #resource{name = XNameBin}}
-		| Rest]) ->
+probe_bindings(Server, JID, [{#resource{name = XNameBin}, _RoutingKey, _Arguments} | Rest]) ->
     ?DEBUG("**** Probing ~p ~p ~p", [JID, XNameBin, Server]),
     SourceJID = jlib:make_jid(binary_to_list(XNameBin), Server, ""),
     send_presence(SourceJID, JID, "probe"),
