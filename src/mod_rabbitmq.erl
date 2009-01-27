@@ -45,7 +45,6 @@
 -include_lib("rabbitmq_server/include/rabbit.hrl").
 
 -define(VHOST, <<"/">>).
--define(REALM, #resource{virtual_host = ?VHOST, kind = realm, name = <<"/data">>}).
 -define(XNAME(Name), #resource{virtual_host = ?VHOST, kind = exchange, name = Name}).
 -define(QNAME(Name), #resource{virtual_host = ?VHOST, kind = queue, name = Name}).
 
@@ -428,9 +427,8 @@ check_and_bind(XNameBin, RKBin, QNameBin) ->
     case rabbit_exchange:lookup(?XNAME(XNameBin)) of
 	{ok, _X} ->
 	    ?DEBUG("... exists", []),
-	    #amqqueue{} = rabbit_amqqueue:declare(?REALM, QNameBin, true, false, []),
-	    {ok, _NBindings} =
-		rabbit_amqqueue:add_binding(?QNAME(QNameBin), ?XNAME(XNameBin), RKBin, []),
+	    #amqqueue{} = rabbit_amqqueue:declare(?QNAME(QNameBin), true, false, []),
+	    ok = rabbit_exchange:add_binding(?XNAME(XNameBin), ?QNAME(QNameBin), RKBin, []),
 	    true;
 	{error, not_found} ->
 	    ?DEBUG("... not present", []),
@@ -440,27 +438,32 @@ check_and_bind(XNameBin, RKBin, QNameBin) ->
 unbind_and_delete(XNameBin, RKBin, QNameBin) ->
     ?DEBUG("Unbinding ~p ~p ~p", [XNameBin, RKBin, QNameBin]),
     QName = ?QNAME(QNameBin),
-    case rabbit_amqqueue:delete_binding(QName, ?XNAME(XNameBin), RKBin, []) of
+    case rabbit_exchange:delete_binding(?XNAME(XNameBin), QName, RKBin, []) of
 	{error, _Reason} ->
-	    ?DEBUG("... queue, binding or exchange not found: ~p. Ignoring", [_Reason]),
+	    ?DEBUG("... queue or exchange not found: ~p. Ignoring", [_Reason]),
 	    no_subscriptions_left;
-	{ok, 0} ->
-	    ?DEBUG("... and deleting", []),
-	    case rabbit_amqqueue:lookup(QName) of
-		{ok, Q} -> rabbit_amqqueue:delete(Q, false, false);
-		{error, not_found} -> ok
-	    end,
-	    ?DEBUG("... deletion complete.", []),
-	    no_subscriptions_left;
-	{ok, _PositiveCountOfBindings} ->
-	    ?DEBUG("... and leaving the queue alone", []),
-	    subscriptions_remain
+	ok ->
+	    ?DEBUG("... checking count of remaining bindings ...", []),
+	    %% Obvious (small) window where Problems (races) May Occur here
+	    case length(rabbit_exchange:list_queue_bindings(QName)) of
+		0 ->
+		    ?DEBUG("... and deleting", []),
+		    case rabbit_amqqueue:lookup(QName) of
+			{ok, Q} -> rabbit_amqqueue:delete(Q, false, false);
+			{error, not_found} -> ok
+		    end,
+		    ?DEBUG("... deletion complete.", []),
+		    no_subscriptions_left;
+		_PositiveCountOfBindings ->
+		    ?DEBUG("... and leaving the queue alone", []),
+		    subscriptions_remain
+	    end
     end.
 
 all_exchange_names() ->
     [binary_to_list(XNameBin) ||
 	#exchange{name = #resource{name = XNameBin}}
-	    <- rabbit_exchange:list_vhost_exchanges(?VHOST),
+	    <- rabbit_exchange:list(?VHOST),
 	XNameBin =/= <<>>].
 
 all_exchanges() ->
@@ -476,7 +479,7 @@ all_exchanges() ->
 		  type = TypeAtom,
 		  durable = IsDurable,
 		  arguments = Arguments}
-	    <- rabbit_exchange:list_vhost_exchanges(?VHOST),
+	    <- rabbit_exchange:list(?VHOST),
 	XNameBin =/= <<>>].
 
 probe_queues(Server) ->
@@ -540,7 +543,7 @@ consumer_init(QNameBin, JID, RKBin, Server, Priority) ->
     rabbit_amqqueue:with(?QNAME(QNameBin),
 			 fun(Q) ->
 				 rabbit_amqqueue:basic_consume(
-				   Q, true, self(), self(),
+				   Q, true, self(), self(), undefined,
 				   ConsumerTag, false, undefined)
 			 end),
     ?MODULE:consumer_main(#consumer_state{lserver = Server,
@@ -588,7 +591,7 @@ consumer_main(#consumer_state{priorities = Priorities} = State) ->
 	    NewPriorities = lists:keysort(1, keystore({JID, RKBin}, 2, Priorities,
 						      {-Priority, {JID, RKBin}})),
 	    ?MODULE:consumer_main(State#consumer_state{priorities = NewPriorities});
-	{deliver, _ConsumerTag, false, {_QName, QPid, _Id, _Redelivered, Msg}} ->
+	{'$gen_cast', {deliver, _ConsumerTag, false, {_QName, QPid, _Id, _Redelivered, Msg}}} ->
 	    #basic_message{exchange_name = #resource{name = XNameBin},
 			   routing_key = RKBin,
 			   content = #content{payload_fragments_rev = PayloadRev}} = Msg,
@@ -711,8 +714,7 @@ do_command_declare(NameStr, [], ParsedArgs) ->
 									  "fanout")))) of
 		{'EXIT', _} -> {error, "Bad exchange type."};
 		TypeAtom ->
-		    #exchange{} = rabbit_exchange:declare(?REALM,
-							  list_to_binary(NameStr),
+		    #exchange{} = rabbit_exchange:declare(?XNAME(list_to_binary(NameStr)),
 							  TypeAtom,
 							  get_arg(ParsedArgs, durable, true),
 							  false,
