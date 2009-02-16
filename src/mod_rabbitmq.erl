@@ -352,6 +352,19 @@ jid_to_qname(#jid{luser = U, lserver = S}) ->
 jid_to_xname(#jid{luser = U, lresource = R}) ->
     {list_to_binary(U), list_to_binary(R)}.
 
+qname_to_jid(QNameBin) when is_binary(QNameBin) ->
+    case jlib:string_to_jid(binary_to_list(QNameBin)) of
+	error ->
+	    error;
+	JID ->
+	    case JID#jid.luser of
+		"" ->
+		    error;
+		_ ->
+		    JID
+	    end
+    end.
+
 maybe_unsub(From, To, XNameBin, RKBin, QNameBin) ->
     case is_subscribed(XNameBin, RKBin, QNameBin) of
 	true ->
@@ -387,11 +400,17 @@ unsub_all(XNameBin, ExchangeJID) ->
 	  end),
     ?INFO_MSG("unsub_all~n~p~n~p~n~p", [XNameBin, ExchangeJID, BindingDescriptions]),
     lists:foreach(fun ({QNameBin, RKBin}) ->
-			  do_unsub(jlib:string_to_jid(binary_to_list(QNameBin)),
-				   jlib:jid_replace_resource(ExchangeJID, binary_to_list(RKBin)),
-				   XNameBin,
-				   RKBin,
-				   QNameBin)
+			  case qname_to_jid(QNameBin) of
+			      error ->
+				  ignore;
+			      QJID ->
+				  do_unsub(QJID,
+					   jlib:jid_replace_resource(ExchangeJID,
+								     binary_to_list(RKBin)),
+					   XNameBin,
+					   RKBin,
+					   QNameBin)
+			  end
 		  end, BindingDescriptions),
     ok.
 
@@ -489,7 +508,7 @@ probe_queues(_Server, []) ->
     ok;
 probe_queues(Server, [#amqqueue{name = QName = #resource{name = QNameBin}} | Rest]) ->
     ?DEBUG("**** Probing ~p", [QNameBin]),
-    case jlib:string_to_jid(binary_to_list(QNameBin)) of
+    case qname_to_jid(QNameBin) of
 	error ->
 	    probe_queues(Server, Rest);
 	JID ->
