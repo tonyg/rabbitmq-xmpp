@@ -539,7 +539,7 @@ stop_consumer(QNameBin, JID, RKBin, AllResources) ->
 consumer_init(QNameBin, JID, RKBin, Server, Priority) ->
     ?INFO_MSG("**** starting consumer for queue ~p~njid ~p~npriority ~p rkbin ~p",
 	      [QNameBin, JID, Priority, RKBin]),
-    ConsumerTag = rabbit_misc:binstring_guid("amq.xmpp"),
+    ConsumerTag = rabbit_guid:binstring_guid("amq.xmpp"),
     rabbit_amqqueue:with(?QNAME(QNameBin),
 			 fun(Q) ->
 				 rabbit_amqqueue:basic_consume(
