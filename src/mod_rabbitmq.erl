@@ -219,9 +219,10 @@ do_route(From, To, {xmlelement, "message", _, _} = Packet) ->
 			"error" ->
 			    ?ERROR_MSG("Received error message~n~p -> ~p~n~p", [From, To, Packet]);
 			_ ->
-			    rabbit_exchange:simple_publish(false, false, ?XNAME(XNameBin), RKBin,
-							   <<"text/plain">>,
-							   list_to_binary(Body))
+                            rabbit_basic:publish(false, false, none,
+                                                 rabbit_basic:message(?XNAME(XNameBin), RKBin,
+                                                                      <<"text/plain">>,
+                                                                      list_to_binary(Body)))
 		    end
 	    end
     end,
