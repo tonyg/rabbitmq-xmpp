@@ -2,7 +2,7 @@
 @author Tony Garnock-Jones <tonyg@lshift.net>
 @author Rabbit Technologies Ltd. <info@rabbitmq.com>
 @author LShift Ltd. <query@lshift.net>
-@copyright 2008 Tony Garnock-Jones and Rabbit Technologies Ltd.; Copyright © 2008-2009 Tony Garnock-Jones and LShift Ltd.
+@copyright 2008 Tony Garnock-Jones and Rabbit Technologies Ltd.; Copyright Â© 2008-2009 Tony Garnock-Jones and LShift Ltd.
 
 @version %%VERSION%%
 
@@ -253,20 +253,17 @@ To compile the gateway,
 
 <ol>
 
-  <li><a href="http://www.rabbitmq.com/download.html">Download</a>, <a
-  href="http://www.rabbitmq.com/build.html">compile</a> and install
-  the RabbitMQ server, so that it is available in
-  <tt>/usr/lib/erlang/lib/</tt> (path may vary by operating system)
-  just as any other Erlang library.</li>
+  <li><a href="http://www.rabbitmq.com/download.html">Download</a>,
+  install, and start the RabbitMQ server.</li>
 
   <li><a
   href="http://www.process-one.net/en/ejabberd/downloads">Download</a>
   (or check out from subversion) ejabberd.</li>
 
-  <li>Copy (or symlink) <tt>src/mod_rabbitmq.erl</tt> into your
-  <tt>ejabberd/src</tt> directory, so that it exists alongside such
-  ejabberd source files as <tt>mod_echo.erl</tt>,
-  <tt>mod_offline.erl</tt> etc.</li>
+  <li>Copy (or symlink) <tt>src/mod_rabbitmq.erl</tt> and
+  <tt>src/rabbit.hrl</tt> into your <tt>ejabberd/src</tt> directory,
+  so that it exists alongside such ejabberd source files as
+  <tt>mod_echo.erl</tt>, <tt>mod_offline.erl</tt> etc.</li>
 
   <li>Compile and install the ejabberd server from the source
   tree.</li>
@@ -289,7 +286,7 @@ node.
 
 To enable the gateway, decide on the DNS name that is to map to the
 AMQP virtual host, and edit <tt>/etc/ejabberd/ejabberd.cfg</tt> to
-include a <tt>{mod_rabbitmq,[]}</tt> stanza in its <tt>modules</tt>
+include a <tt>mod_rabbitmq</tt> stanza in its <tt>modules</tt>
 section:
 
 <pre>
@@ -297,11 +294,18 @@ section:
  [
   {mod_adhoc,    []},
   ...
-  <b>{mod_rabbitmq, []},</b>
+  <b>{mod_rabbitmq, [{rabbitmq_node, rabbit@<i>yourhostname</i>}]},</b>
   ...
   {mod_version,  []}
  ]}.
 </pre>
+
+Set the <tt>rabbitmq_node</tt> setting to the Erlang node name of your
+RabbitMQ server: for most normal installations, this will
+be <tt>rabbit@<i>yourhostname</i></tt>,
+where <tt><i>yourhostname</i></tt> is the short form of your machine's
+node name. As an example, for the machine <tt>devbox.example.com</tt>,
+the usual RabbitMQ server node name would be <tt>rabbit@devbox</tt>.
 
 == Limitations ==
 
