@@ -42,7 +42,7 @@
 
 -include("ejabberd.hrl").
 -include("jlib.hrl").
--include_lib("rabbitmq_server/include/rabbit.hrl").
+-include("rabbit.hrl").
 
 -define(VHOST, <<"/">>).
 -define(XNAME(Name), #resource{virtual_host = ?VHOST, kind = exchange, name = Name}).
@@ -84,13 +84,7 @@ stop(Host) ->
 
 %% @hidden
 init([Host, Opts]) ->
-    case catch rabbit_mnesia:create_tables() of
-	{error, {table_creation_failed, _, _, {already_exists, _}}} ->
-	    ok;
-	ok ->
-	    ok
-    end,
-    ok = rabbit:start(),
+    ok = contact_rabbitmq(),
 
     MyHost = gen_mod:get_opt_host(Host, Opts, "rabbitmq.@HOST@"),
     ejabberd_router:register_route(MyHost, {apply, ?MODULE, route}),
@@ -99,7 +93,28 @@ init([Host, Opts]) ->
 
     {ok, #state{host = MyHost}}.
 
+contact_rabbitmq() ->
+    case get(rabbitmq_node) of
+        undefined ->
+            RabbitNode = case gen_mod:get_module_opt(global, ?MODULE, rabbitmq_node, undefined) of
+                             undefined ->
+                                 [_NodeName, NodeHost] = string:tokens(atom_to_list(node()), "@"),
+                                 list_to_atom("rabbit@" ++ NodeHost);
+                             A ->
+                                 A
+                         end,
+            {contacting_rabbitmq, RabbitNode, pong} =
+                {contacting_rabbitmq, RabbitNode, net_adm:ping(RabbitNode)},
+            error_logger:info_report({contacted_rabbitmq, RabbitNode}),
+            put(rabbitmq_node, RabbitNode),
+            ok;
+        _ ->
+            ok
+    end.
+
 %% @hidden
+handle_call(get_rabbitmq_node, _From, State) ->
+    {reply, get(rabbitmq_node), State};
 handle_call(stop, _From, State) ->
     {stop, normal, ok, State}.
 
@@ -127,6 +142,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @hidden
 route(From, To, Packet) ->
+    ok = contact_rabbitmq(),
     safe_route(shortcut, From, To, Packet).
 
 safe_route(ShortcutKind, From, To, Packet) ->
@@ -138,6 +154,17 @@ safe_route(ShortcutKind, From, To, Packet) ->
 	_ ->
 	    ok
     end.
+
+rabbit_call(M, F, A) ->
+    case rpc:call(get(rabbitmq_node), M, F, A) of
+        {badrpc, {'EXIT', Reason}} ->
+            exit(Reason);
+        V ->
+            V
+    end.
+
+rabbit_exchange_lookup(XN) ->
+    rabbit_call(rabbit_exchange, lookup, [XN]).
 
 do_route(#jid{lserver = FromServer} = From,
 	 #jid{lserver = ToServer} = To,
@@ -169,7 +196,7 @@ do_route(From, To, {xmlelement, "presence", _, _} = Packet) ->
     {XNameBin, RKBin} = jid_to_xname(To),
     case xml:get_tag_attr_s("type", Packet) of
 	"subscribe" ->
-	    case rabbit_exchange:lookup(?XNAME(XNameBin)) of
+	    case rabbit_exchange_lookup(?XNAME(XNameBin)) of
 		{ok, _X} -> send_presence(To, From, "subscribe");
 		{error, not_found} -> send_presence(To, From, "unsubscribed")
 	    end;
@@ -219,10 +246,15 @@ do_route(From, To, {xmlelement, "message", _, _} = Packet) ->
 			"error" ->
 			    ?ERROR_MSG("Received error message~n~p -> ~p~n~p", [From, To, Packet]);
 			_ ->
-                            rabbit_basic:publish(false, false, none,
-                                                 rabbit_basic:message(?XNAME(XNameBin), RKBin,
-                                                                      <<"text/plain">>,
-                                                                      list_to_binary(Body)))
+                            %% FIXME: So many roundtrips!!
+                            Msg = rabbit_call(rabbit_basic, message,
+                                              [?XNAME(XNameBin),
+                                               RKBin,
+                                               <<"text/plain">>,
+                                               list_to_binary(Body)]),
+                            Delivery = rabbit_call(rabbit_basic, delivery,
+                                                   [false, false, none, Msg]),
+                            rabbit_call(rabbit_basic, publish, [Delivery])
 		    end
 	    end
     end,
@@ -293,7 +325,7 @@ disco_info_module(_Server) ->
 			    "http://jabber.org/protocol/disco#items"])}.
 
 disco_info_exchange(XNameBin, _RKBin) ->
-    Tail = case rabbit_exchange:lookup(?XNAME(XNameBin)) of
+    Tail = case rabbit_exchange_lookup(?XNAME(XNameBin)) of
 	       {ok, #exchange{type = TypeAtom}} ->
 		   ["amqp-exchange-" ++ atom_to_list(TypeAtom)];
 	       {error, not_found} ->
@@ -389,14 +421,15 @@ do_unsub(QJID, XJID, XNameBin, RKBin, QNameBin) ->
 get_bound_queues(XNameBin) ->
     XName = ?XNAME(XNameBin),
     [{QNameBin, RKBin} ||
-	{#resource{name = QNameBin}, RKBin, _} <- rabbit_exchange:list_exchange_bindings(XName)].
+	{#resource{name = QNameBin}, RKBin, _} <-
+            rabbit_call(rabbit_exchange, list_exchange_bindings, [XName])].
 
 unsub_all(XNameBin, ExchangeJID) ->
     {atomic, BindingDescriptions} =
 	mnesia:transaction(
 	  fun () ->
 		  BoundQueues = get_bound_queues(XNameBin),
-		  rabbit_exchange:delete(?XNAME(XNameBin), false),
+		  rabbit_call(rabbit_exchange, delete, [?XNAME(XNameBin), false]),
 		  BoundQueues
 	  end),
     ?INFO_MSG("unsub_all~n~p~n~p~n~p", [XNameBin, ExchangeJID, BindingDescriptions]),
@@ -432,6 +465,9 @@ send_message(From, To, TypeStr, BodyStr) ->
     ?DEBUG("Delivering ~p -> ~p~n~p", [From, To, XmlBody]),
     ejabberd_router:route(From, To, XmlBody).
 
+rabbit_exchange_list_queue_bindings(QN) ->
+    rabbit_call(rabbit_exchange, list_queue_bindings, [QN]).
+
 is_subscribed(XNameBin, RKBin, QNameBin) ->
     XName = ?XNAME(XNameBin),
     lists:any(fun 
@@ -440,15 +476,17 @@ is_subscribed(XNameBin, RKBin, QNameBin) ->
 		      true;
 		  (_) ->
 		      false
-	      end, rabbit_exchange:list_queue_bindings(?QNAME(QNameBin))).
+	      end, rabbit_exchange_list_queue_bindings(?QNAME(QNameBin))).
 
 check_and_bind(XNameBin, RKBin, QNameBin) ->
     ?DEBUG("Checking ~p ~p ~p", [XNameBin, RKBin, QNameBin]),
-    case rabbit_exchange:lookup(?XNAME(XNameBin)) of
+    case rabbit_exchange_lookup(?XNAME(XNameBin)) of
 	{ok, _X} ->
 	    ?DEBUG("... exists", []),
-	    #amqqueue{} = rabbit_amqqueue:declare(?QNAME(QNameBin), true, false, []),
-	    ok = rabbit_exchange:add_binding(?XNAME(XNameBin), ?QNAME(QNameBin), RKBin, []),
+	    #amqqueue{} = rabbit_call(rabbit_amqqueue, declare,
+                                      [?QNAME(QNameBin), true, false, []]),
+	    ok = rabbit_call(rabbit_exchange, add_binding,
+                             [?XNAME(XNameBin), ?QNAME(QNameBin), RKBin, []]),
 	    true;
 	{error, not_found} ->
 	    ?DEBUG("... not present", []),
@@ -458,18 +496,19 @@ check_and_bind(XNameBin, RKBin, QNameBin) ->
 unbind_and_delete(XNameBin, RKBin, QNameBin) ->
     ?DEBUG("Unbinding ~p ~p ~p", [XNameBin, RKBin, QNameBin]),
     QName = ?QNAME(QNameBin),
-    case rabbit_exchange:delete_binding(?XNAME(XNameBin), QName, RKBin, []) of
+    case rabbit_call(rabbit_exchange, delete_binding,
+                     [?XNAME(XNameBin), QName, RKBin, []]) of
 	{error, _Reason} ->
 	    ?DEBUG("... queue or exchange not found: ~p. Ignoring", [_Reason]),
 	    no_subscriptions_left;
 	ok ->
 	    ?DEBUG("... checking count of remaining bindings ...", []),
 	    %% Obvious (small) window where Problems (races) May Occur here
-	    case length(rabbit_exchange:list_queue_bindings(QName)) of
+	    case length(rabbit_exchange_list_queue_bindings(QName)) of
 		0 ->
 		    ?DEBUG("... and deleting", []),
-		    case rabbit_amqqueue:lookup(QName) of
-			{ok, Q} -> rabbit_amqqueue:delete(Q, false, false);
+		    case rabbit_call(rabbit_amqqueue, lookup, [QName]) of
+			{ok, Q} -> rabbit_call(rabbit_amqqueue, delete, [Q, false, false]);
 			{error, not_found} -> ok
 		    end,
 		    ?DEBUG("... deletion complete.", []),
@@ -483,7 +522,7 @@ unbind_and_delete(XNameBin, RKBin, QNameBin) ->
 all_exchange_names() ->
     [binary_to_list(XNameBin) ||
 	#exchange{name = #resource{name = XNameBin}}
-	    <- rabbit_exchange:list(?VHOST),
+	    <- rabbit_call(rabbit_exchange, list, [?VHOST]),
 	XNameBin =/= <<>>].
 
 all_exchanges() ->
@@ -499,11 +538,11 @@ all_exchanges() ->
 		  type = TypeAtom,
 		  durable = IsDurable,
 		  arguments = Arguments}
-	    <- rabbit_exchange:list(?VHOST),
+	    <- rabbit_call(rabbit_exchange, list, [?VHOST]),
 	XNameBin =/= <<>>].
 
 probe_queues(Server) ->
-    probe_queues(Server, rabbit_amqqueue:list(?VHOST)).
+    probe_queues(Server, rabbit_call(rabbit_amqqueue, list, [?VHOST])).
 
 probe_queues(_Server, []) ->
     ok;
@@ -513,7 +552,7 @@ probe_queues(Server, [#amqqueue{name = QName = #resource{name = QNameBin}} | Res
 	error ->
 	    probe_queues(Server, Rest);
 	JID ->
-	    probe_bindings(Server, JID, rabbit_exchange:list_queue_bindings(QName)),
+	    probe_bindings(Server, JID, rabbit_exchange_list_queue_bindings(QName)),
 	    probe_queues(Server, Rest)
     end.
 
@@ -555,17 +594,27 @@ stop_consumer(QNameBin, JID, RKBin, AllResources) ->
       end),
     ok.
 
+with_queue(QN, Fun) ->
+    %% FIXME: No way of using rabbit_amqqueue:with/2, so using this awful kludge :-(
+    case rabbit_call(rabbit_amqqueue, lookup, [QN]) of
+        {ok, Q} ->
+            Fun(Q);
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
 %% @hidden
 consumer_init(QNameBin, JID, RKBin, Server, Priority) ->
     ?INFO_MSG("**** starting consumer for queue ~p~njid ~p~npriority ~p rkbin ~p",
 	      [QNameBin, JID, Priority, RKBin]),
-    ConsumerTag = rabbit_guid:binstring_guid("amq.xmpp"),
-    rabbit_amqqueue:with(?QNAME(QNameBin),
-			 fun(Q) ->
-				 rabbit_amqqueue:basic_consume(
-				   Q, true, self(), self(), undefined,
-				   ConsumerTag, false, undefined)
-			 end),
+    ok = contact_rabbitmq(),
+    ConsumerTag = rabbit_call(rabbit_guid, binstring_guid, ["amq.xmpp"]),
+    with_queue(?QNAME(QNameBin),
+               fun(Q) ->
+                       rabbit_call(rabbit_amqqueue, basic_consume,
+                                   [Q, true, self(), self(), undefined,
+                                    ConsumerTag, false, undefined])
+               end),
     ?MODULE:consumer_main(#consumer_state{lserver = Server,
 					  consumer_tag = ConsumerTag,
 					  queue = QNameBin,
@@ -622,7 +671,7 @@ consumer_main(#consumer_state{priorities = Priorities} = State) ->
 			 TopPriorityJID,
 			 "chat",
 			 binary_to_list(list_to_binary(lists:reverse(PayloadRev)))),
-	    rabbit_amqqueue:notify_sent(QPid, self()),
+            rabbit_call(rabbit_amqqueue, notify_sent, [QPid, self()]),
 	    ?MODULE:consumer_main(State);
 	Other ->
 	    ?INFO_MSG("Consumer main ~p got~n~p", [State#consumer_state.queue, Other]),
@@ -639,10 +688,11 @@ keystore(_Key, _N, [], New) ->
     [New].
 
 consumer_done(#consumer_state{queue = QNameBin, consumer_tag = ConsumerTag}) ->
-    rabbit_amqqueue:with(?QNAME(QNameBin),
-			 fun (Q) ->
-				 rabbit_amqqueue:basic_cancel(Q, self(), ConsumerTag, undefined)
-			 end),
+    with_queue(?QNAME(QNameBin),
+               fun (Q) ->
+                       rabbit_call(rabbit_amqqueue, basic_cancel,
+                                   [Q, self(), ConsumerTag, undefined])
+               end),
     ok.
 
 parse_command(Str) ->
@@ -729,16 +779,16 @@ do_command_declare(NameStr, [], ParsedArgs) ->
 	"amq." ++ _ ->
 	    {ok, "Names may not start with 'amq.'."};
 	_ ->
-	    case catch (rabbit_exchange:check_type(list_to_binary(get_arg(ParsedArgs,
-									  type,
-									  "fanout")))) of
+	    case catch (rabbit_call(rabbit_exchange, check_type,
+                                    [list_to_binary(get_arg(ParsedArgs, type, "fanout"))])) of
 		{'EXIT', _} -> {error, "Bad exchange type."};
 		TypeAtom ->
-		    #exchange{} = rabbit_exchange:declare(?XNAME(list_to_binary(NameStr)),
-							  TypeAtom,
-							  get_arg(ParsedArgs, durable, true),
-							  false,
-							  []),
+		    #exchange{} = rabbit_call(rabbit_exchange, declare,
+                                              [?XNAME(list_to_binary(NameStr)),
+                                               TypeAtom,
+                                               get_arg(ParsedArgs, durable, true),
+                                               false,
+                                               []]),
 		    {ok, "Exchange ~p of type ~p declared. Now you can subscribe to it.",
 		     [NameStr, TypeAtom]}
 	    end
