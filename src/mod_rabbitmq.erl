@@ -735,12 +735,12 @@ do_command(#jid{lserver = Server} = _To, _From, _RawCommand, {"exchange.delete",
     end;
 do_command(#jid{lserver = Server} = _To, _From, _RawCommand, {"bind", [NameStr, JIDStr]}) ->
     do_command_bind(Server, NameStr, JIDStr, "");
-do_command(#jid{lserver = Server} = _To, _From, _RawCommand, {"bind", [NameStr, JIDStr, RK]}) ->
-    do_command_bind(Server, NameStr, JIDStr, RK);
+do_command(#jid{lserver = Server} = _To, _From, _RawCommand, {"bind", [NameStr, JIDStr, RK | RKs]}) ->
+    do_command_bind(Server, NameStr, JIDStr, check_ichat_brokenness(JIDStr, RK, RKs));
 do_command(#jid{lserver = Server} = _To, _From, _RawCommand, {"unbind", [NameStr, JIDStr]}) ->
     do_command_unbind(Server, NameStr, JIDStr, "");
-do_command(#jid{lserver = Server} = _To, _From, _RawCommand, {"unbind", [NameStr, JIDStr, RK]}) ->
-    do_command_unbind(Server, NameStr, JIDStr, RK);
+do_command(#jid{lserver = Server} = _To, _From, _RawCommand, {"unbind", [NameStr, JIDStr, RK | RKs]}) ->
+    do_command_unbind(Server, NameStr, JIDStr, check_ichat_brokenness(JIDStr, RK, RKs));
 do_command(_To, _From, _RawCommand, {"list", []}) ->
     {ok, "Exchanges available:~n~p",
      [all_exchanges()]};
@@ -794,26 +794,32 @@ do_command_declare(NameStr, [], ParsedArgs) ->
 	    end
     end.
 
-dwim_string_to_jid(S = "[mailto:" ++ Trailer) ->
-    case string:right(Trailer, 1) of
-        "]" ->
-            jlib:string_to_jid(string:substr(Trailer, 1, length(Trailer) - 1));
-        _ ->
-            jlib:string_to_jid(S)
-    end;
-dwim_string_to_jid(S) ->
-    jlib:string_to_jid(S).
+interleave(_Spacer, []) ->
+    [];
+interleave(_Spacer, [E]) ->
+    E;
+interleave(Spacer, [E | Rest]) ->
+    E ++ Spacer ++ interleave(Spacer, Rest).
+
+check_ichat_brokenness(JIDStr, RK, RKs) ->
+    IChatLink = "[mailto:" ++ JIDStr ++ "]",
+    if
+	RK == IChatLink ->
+	    interleave(" ", RKs);
+	true ->
+	    interleave(" ", [RK | RKs])
+    end.
 
 do_command_bind(Server, NameStr, JIDStr, RK) ->
     XJID = jlib:make_jid(NameStr, Server, RK),
-    QJID = dwim_string_to_jid(JIDStr),
+    QJID = jlib:string_to_jid(JIDStr),
     send_presence(XJID, QJID, "subscribe"),
     {ok, "Subscription process ~p <--> ~p initiated. Good luck!",
      [jlib:jid_to_string(XJID), jlib:jid_to_string(QJID)]}.
 
 do_command_unbind(Server, NameStr, JIDStr, RK) ->
     XJID = jlib:make_jid(NameStr, Server, RK),
-    QJID = dwim_string_to_jid(JIDStr),
+    QJID = jlib:string_to_jid(JIDStr),
     do_unsub(QJID, XJID, list_to_binary(NameStr), list_to_binary(RK), list_to_binary(JIDStr)),
     {ok, "Unsubscription process ~p <--> ~p initiated. Good luck!",
      [jlib:jid_to_string(XJID), jlib:jid_to_string(QJID)]}.
