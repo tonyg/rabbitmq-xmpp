@@ -794,16 +794,26 @@ do_command_declare(NameStr, [], ParsedArgs) ->
 	    end
     end.
 
+dwim_string_to_jid(S = "[mailto:" ++ Trailer) ->
+    case string:right(Trailer, 1) of
+        "]" ->
+            jlib:string_to_jid(string:substr(Trailer, 1, length(Trailer) - 1));
+        _ ->
+            jlib:string_to_jid(S)
+    end;
+dwim_string_to_jid(S) ->
+    jlib:string_to_jid(S).
+
 do_command_bind(Server, NameStr, JIDStr, RK) ->
     XJID = jlib:make_jid(NameStr, Server, RK),
-    QJID = jlib:string_to_jid(JIDStr),
+    QJID = dwim_string_to_jid(JIDStr),
     send_presence(XJID, QJID, "subscribe"),
     {ok, "Subscription process ~p <--> ~p initiated. Good luck!",
      [jlib:jid_to_string(XJID), jlib:jid_to_string(QJID)]}.
 
 do_command_unbind(Server, NameStr, JIDStr, RK) ->
     XJID = jlib:make_jid(NameStr, Server, RK),
-    QJID = jlib:string_to_jid(JIDStr),
+    QJID = dwim_string_to_jid(JIDStr),
     do_unsub(QJID, XJID, list_to_binary(NameStr), list_to_binary(RK), list_to_binary(JIDStr)),
     {ok, "Unsubscription process ~p <--> ~p initiated. Good luck!",
      [jlib:jid_to_string(XJID), jlib:jid_to_string(QJID)]}.
