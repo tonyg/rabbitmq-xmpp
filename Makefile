@@ -3,6 +3,8 @@
 DOC_DIR=doc
 VERSION=0.0.1
 
+EJABBERD_INCLUDE_DIR=/usr/lib/ejabberd/include
+
 WIDTH=1024
 #WIDTH=800
 DPI=$(shell echo '90 * $(WIDTH) / 1024' | bc)
@@ -13,7 +15,7 @@ else
 SED=sed
 endif
 
-all: documentation
+all: mod_rabbitmq.beam documentation
 
 clean:
 	rm -rf doc/*
@@ -39,3 +41,6 @@ doc/overview.edoc: src/overview.edoc.in
 
 doc/%.png: src/%.svg
 	inkscape --export-dpi=$(DPI) --export-png=$@ $<
+
+%.beam: src/%.erl
+	erlc -I $(EJABBERD_INCLUDE_DIR) $<
