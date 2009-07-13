@@ -250,7 +250,7 @@ do_route(From, To, {xmlelement, "message", _, _} = Packet) ->
                             Msg = rabbit_call(rabbit_basic, message,
                                               [?XNAME(XNameBin),
                                                RKBin,
-                                               <<"text/plain">>,
+                                               [{'content_type', <<"text/plain">>}],
                                                list_to_binary(Body)]),
                             Delivery = rabbit_call(rabbit_basic, delivery,
                                                    [false, false, none, Msg]),
