@@ -19,6 +19,7 @@ all: mod_rabbitmq.beam documentation
 
 clean:
 	rm -f mod_rabbitmq.beam
+	rm -f build-stamp install-stamp
 
 clean-doc:
 	rm -rf doc/*
