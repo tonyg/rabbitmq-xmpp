@@ -18,6 +18,9 @@ endif
 all: mod_rabbitmq.beam documentation
 
 clean:
+	rm -f mod_rabbitmq.beam
+
+clean-doc:
 	rm -rf doc/*
 
 doc:
@@ -44,3 +47,5 @@ doc/%.png: src/%.svg
 
 %.beam: src/%.erl
 	erlc -I $(EJABBERD_INCLUDE_DIR) $<
+
+distclean: clean
