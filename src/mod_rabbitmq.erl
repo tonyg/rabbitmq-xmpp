@@ -359,7 +359,7 @@ disco_info_result([Feature | Rest], ConvertedPieces) ->
 
 disco_items_result(Pieces) ->
     [{xmlelement, "query", [{"xmlns", "http://jabber.org/protocol/disco#items"}],
-      [{xmlelement, "item", [{"jid", jlib:jid_to_string(Jid)}], []} || Jid <- Pieces]}].
+      [{xmlelement, "item", [{"jid", jlib:jid_to_string(Jid)}], []} || Jid = #jid{} <- Pieces]}].
 
 iq_error(TypeStr, ConditionStr, MessageStr) ->
     iq_error(TypeStr, ConditionStr, MessageStr, []).
