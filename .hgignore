@@ -2,6 +2,7 @@ syntax: regexp
 ^scratch$
 ^doc/overview\.edoc$
 ^ebin/.*\.beam$
+^deps/exmpp/.*\.ez$
 ^deps/exmpp/priv/
 ^deps/exmpp/ebin/
 ^deps/exmpp/doc/

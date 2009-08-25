@@ -1,4 +1,4 @@
-all: ebin
+all: exmpp.ez
 
 clean:
 	rm -rf exmpp-0.9.1 build doc ebin include priv
@@ -25,3 +25,9 @@ exmpp-0.9.1: build/Makefile
 
 ebin: exmpp-0.9.1
 	mv exmpp-0.9.1/* .
+
+exmpp.ez: ebin
+	rm -rf build/exmpp
+	mkdir -p build/exmpp
+	cp -r ebin include build/exmpp
+	(cd build; zip -r ../exmpp.ez exmpp)
