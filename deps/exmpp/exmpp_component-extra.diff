@@ -1,0 +1,16 @@
+Index: src/Makefile.in
+===================================================================
+--- src/Makefile.in     (revision 850)
++++ src/Makefile.in     (working copy)
+212a213
+>              network/exmpp_component.erl                                \
+
+Index: ebin/Makefile.in
+===================================================================
+--- ebin/Makefile.in     (revision 850)
++++ ebin/Makefile.in     (working copy)
+224c224
+< 	exmpp_tcp.beam exmpp_bosh.beam $(am__append_1)
+---
+> 	exmpp_tcp.beam exmpp_bosh.beam exmpp_component.beam $(am__append_1)
+

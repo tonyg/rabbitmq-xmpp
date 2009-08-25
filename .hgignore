@@ -1,2 +1,17 @@
+syntax: regexp
 ^scratch$
 ^doc/overview\.edoc$
+^ebin/.*\.beam$
+^deps/exmpp/priv/
+^deps/exmpp/ebin/
+^deps/exmpp/doc/
+^deps/exmpp/build/
+^deps/exmpp/include/
+^deps/exmpp/exmpp-0.9.1.tar.gz$
+^deps/exmpp/exmpp_component.diff$
+^tmp/
+^build/
+^dist/
+
+syntax: glob
+.DS_Store
