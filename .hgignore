@@ -10,6 +10,12 @@ syntax: regexp
 ^deps/exmpp/include/
 ^deps/exmpp/exmpp-0.9.1.tar.gz$
 ^deps/exmpp/exmpp_component.diff$
+^deps/ejabberd/build/
+^deps/ejabberd/var/
+^deps/ejabberd/sbin/
+^deps/ejabberd/etc/
+^deps/ejabberd/ejabberd-2.0.5.tar.gz$
+^deps/ejabberd/.*\.ez$
 ^tmp/
 ^build/
 ^dist/

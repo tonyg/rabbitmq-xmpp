@@ -39,7 +39,10 @@ stop() ->
     ok.
 
 start(normal, []) ->
-    rabbit_xmpp_sup:start_link().
+    io:format("starting XMPP listeners       ..."),
+    Res = rabbit_xmpp_sup:start_link(),
+    io:format("done~n"),
+    Res.
 
 stop(_State) ->
     ok.

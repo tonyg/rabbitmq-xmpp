@@ -56,7 +56,7 @@
 -define(WARNING_MSG(Fmt, Vals), io:format("WARNING: " ++ Fmt ++ "~n", Vals)).
 -define(ERROR_MSG(Fmt, Vals), io:format("ERROR: " ++ Fmt ++ "~n", Vals)).
 
--define(HOST, "amqp.localhost").
+-define(HOST, application:get_env(rabbit_xmpp, component_host)).
 
 start_link() ->
     {ok, spawn(?MODULE, init, [])}.
@@ -65,14 +65,19 @@ stop(EchoComPid) ->
     EchoComPid ! stop.
 
 init() ->
+    {ok, Server} = application:get_env(rabbit_xmpp, xmpp_server),
+    {ok, Port} = application:get_env(rabbit_xmpp, component_port),
+    {ok, Host} = application:get_env(rabbit_xmpp, component_host),
+    {ok, Secret} = application:get_env(rabbit_xmpp, component_secret),
+    
     application:start(exmpp),
     XmppCom = exmpp_component:start(),
-    exmpp_component:auth(XmppCom, ?HOST, "secret"),
-    _StreamId = exmpp_component:connect(XmppCom, "localhost", 5288),
+    exmpp_component:auth(XmppCom, Host, Secret),
+    _StreamId = exmpp_component:connect(XmppCom, Server, Port),
     exmpp_component:handshake(XmppCom),
     mnesia:create_table(rabbitmq_consumer_process,
             			[{attributes, record_info(fields, rabbitmq_consumer_process)}]),
-    probe_queues(XmppCom, ?HOST),
+    probe_queues(XmppCom, Host),
     loop(XmppCom).
 
 loop(XmppCom) ->
