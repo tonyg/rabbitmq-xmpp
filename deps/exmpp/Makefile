@@ -1,20 +1,17 @@
 all: exmpp.ez
 
 clean:
-	rm -rf exmpp-0.9.1 build doc ebin include priv
+	rm -rf exmpp-0.9.1 build doc ebin include priv exmpp.ez
 
 veryclean: clean
 	rm exmpp-0.9.1.tar.gz
 
 exmpp-0.9.1.tar.gz:
-	wget -O exmpp-0.9.1.tar.gz http://download.process-one.net/exmpp/exmpp-0.9.1-r851.tar.gz
-exmpp_component.diff:
-	wget --no-check-certificate https://support.process-one.net/secure/attachment/14854/exmpp_component.diff
+	wget -O exmpp-0.9.1.tar.gz http://download.process-one.net/exmpp/exmpp-0.9.1-r856.tar.gz
 
-build: exmpp-0.9.1.tar.gz exmpp_component.diff
+build: exmpp-0.9.1.tar.gz 
 	tar -xzf exmpp-0.9.1.tar.gz
-	mv exmpp-0.9.1-r851 build
-	(cd build; patch -p0 <../exmpp_component.diff; patch -p0 <../exmpp_component-extra.diff)
+	mv exmpp-0.9.1-r856 build
 
 build/Makefile: build
 	(cd build; ./configure --prefix=`pwd`/..)
