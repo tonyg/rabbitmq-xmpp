@@ -10,7 +10,7 @@ WIDTH=1024
 DPI=$(shell echo '90 * $(WIDTH) / 1024' | bc)
 
 ifeq ($(shell uname -s),Darwin)
-SED=gnused
+SED=gsed
 else
 SED=sed
 endif
