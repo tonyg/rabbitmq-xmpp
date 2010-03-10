@@ -15,7 +15,7 @@ else
 SED=sed
 endif
 
-all: mod_rabbitmq.beam documentation
+all: mod_rabbitmq.beam
 
 clean:
 	rm -f mod_rabbitmq.beam
