@@ -484,7 +484,7 @@ check_and_bind(XNameBin, RKBin, QNameBin) ->
 	{ok, _X} ->
 	    ?DEBUG("... exists", []),
 	    #amqqueue{} = rabbit_call(rabbit_amqqueue, declare,
-                                      [?QNAME(QNameBin), true, false, []]),
+                                      [?QNAME(QNameBin), true, false, [], none]),
 	    ok = rabbit_call(rabbit_exchange, add_binding,
                              [?XNAME(XNameBin), ?QNAME(QNameBin), RKBin, []]),
 	    true;
