@@ -612,8 +612,7 @@ consumer_init(QNameBin, JID, RKBin, Server, Priority) ->
     with_queue(?QNAME(QNameBin),
                fun(Q) ->
                        rabbit_call(rabbit_amqqueue, basic_consume,
-                                   [Q, true, self(), self(), undefined,
-                                    ConsumerTag, false, undefined])
+                                   [Q, true, self(), undefined, ConsumerTag, false, undefined])
                end),
     ?MODULE:consumer_main(#consumer_state{lserver = Server,
 					  consumer_tag = ConsumerTag,
