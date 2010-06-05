@@ -4,6 +4,7 @@ DOC_DIR=doc
 VERSION=0.0.1
 
 EJABBERD_INCLUDE_DIR=/usr/lib/ejabberd/include
+CANONICAL_RABBIT_HEADER=../rabbitmq-server/include/rabbit.hrl
 
 WIDTH=1024
 #WIDTH=800
@@ -15,7 +16,10 @@ else
 SED=sed
 endif
 
-all: mod_rabbitmq.beam
+all: check_rabbit_hrl mod_rabbitmq.beam
+
+check_rabbit_hrl:
+	@if [ -e $(CANONICAL_RABBIT_HEADER) ]; then diff -q $(CANONICAL_RABBIT_HEADER) src/rabbit.hrl; else echo Skipping rabbit.hrl check because $(CANONICAL_RABBIT_HEADER) does not exist; fi
 
 clean:
 	rm -f mod_rabbitmq.beam
