@@ -421,7 +421,7 @@ do_unsub(QJID, XJID, XNameBin, RKBin, QNameBin) ->
 get_bound_queues(XNameBin) ->
     XName = ?XNAME(XNameBin),
     [{QNameBin, RKBin} ||
-	#binding{queue_name = #resource{name = QNameBin, key = RKBin}} <-
+	#binding{queue_name = #resource{name = QNameBin}, key = RKBin} <-
             rabbit_call(rabbit_binding, list_for_exchange, [XName])].
 
 unsub_all(XNameBin, ExchangeJID) ->
