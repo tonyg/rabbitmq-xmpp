@@ -422,7 +422,7 @@ get_bound_queues(XNameBin) ->
     XName = ?XNAME(XNameBin),
     [{QNameBin, RKBin} ||
 	{#resource{name = QNameBin}, RKBin, _} <-
-            rabbit_call(rabbit_binding, list_exchange_bindings, [XName])].
+            rabbit_call(rabbit_binding, list_for_exchange, [XName])].
 
 unsub_all(XNameBin, ExchangeJID) ->
     {atomic, BindingDescriptions} =
@@ -466,7 +466,7 @@ send_message(From, To, TypeStr, BodyStr) ->
     ejabberd_router:route(From, To, XmlBody).
 
 rabbit_exchange_list_queue_bindings(QN) ->
-    rabbit_call(rabbit_binding, list_queue_bindings, [QN]).
+    rabbit_call(rabbit_binding, list_for_queue, [QN]).
 
 is_subscribed(XNameBin, RKBin, QNameBin) ->
     XName = ?XNAME(XNameBin),
@@ -496,7 +496,7 @@ check_and_bind(XNameBin, RKBin, QNameBin) ->
 unbind_and_delete(XNameBin, RKBin, QNameBin) ->
     ?DEBUG("Unbinding ~p ~p ~p", [XNameBin, RKBin, QNameBin]),
     QName = ?QNAME(QNameBin),
-    case rabbit_call(rabbit_binding, delete,
+    case rabbit_call(rabbit_binding, remove,
                      [?XNAME(XNameBin), QName, RKBin, []]) of
 	{error, _Reason} ->
 	    ?DEBUG("... queue or exchange not found: ~p. Ignoring", [_Reason]),
