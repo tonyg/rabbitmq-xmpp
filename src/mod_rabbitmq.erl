@@ -421,7 +421,7 @@ do_unsub(QJID, XJID, XNameBin, RKBin, QNameBin) ->
 get_bound_queues(XNameBin) ->
     XName = ?XNAME(XNameBin),
     [{QNameBin, RKBin} ||
-	{#resource{name = QNameBin}, RKBin, _} <-
+	#binding{queue_name = #resource{name = QNameBin}} <-
             rabbit_call(rabbit_binding, list_for_exchange, [XName])].
 
 unsub_all(XNameBin, ExchangeJID) ->
@@ -470,9 +470,8 @@ rabbit_exchange_list_queue_bindings(QN) ->
 
 is_subscribed(XNameBin, RKBin, QNameBin) ->
     XName = ?XNAME(XNameBin),
-    lists:any(fun 
-		  ({N, R, _Arguments})
-		  when N == XName andalso R == RKBin ->
+    lists:any(fun (#binding{exchange_name = N, key = R})
+                    when N == XName andalso R == RKBin ->
 		      true;
 		  (_) ->
 		      false
@@ -486,7 +485,10 @@ check_and_bind(XNameBin, RKBin, QNameBin) ->
 	    #amqqueue{} = rabbit_call(rabbit_amqqueue, declare,
                                       [?QNAME(QNameBin), true, false, [], none]),
 	    ok = rabbit_call(rabbit_binding, add,
-                             [?XNAME(XNameBin), ?QNAME(QNameBin), RKBin, []]),
+                             [#binding{exchange_name = ?XNAME(XNameBin),
+                                       queue_name    = ?QNAME(QNameBin),
+                                       key           = RKBin,
+                                       args          = []}]),
 	    true;
 	{error, not_found} ->
 	    ?DEBUG("... not present", []),
@@ -495,9 +497,13 @@ check_and_bind(XNameBin, RKBin, QNameBin) ->
 
 unbind_and_delete(XNameBin, RKBin, QNameBin) ->
     ?DEBUG("Unbinding ~p ~p ~p", [XNameBin, RKBin, QNameBin]),
+    XName = ?XNAME(XNameBin),
     QName = ?QNAME(QNameBin),
     case rabbit_call(rabbit_binding, remove,
-                     [?XNAME(XNameBin), QName, RKBin, []]) of
+                     [#binding{exchange_name = XName,
+                               queue_name    = QName,
+                               key           = RKBin,
+                               args          = []}]) of
 	{error, _Reason} ->
 	    ?DEBUG("... queue or exchange not found: ~p. Ignoring", [_Reason]),
 	    no_subscriptions_left;
@@ -558,7 +564,8 @@ probe_queues(Server, [#amqqueue{name = QName = #resource{name = QNameBin}} | Res
 
 probe_bindings(_Server, _JID, []) ->
     ok;
-probe_bindings(Server, JID, [{#resource{name = XNameBin}, _RoutingKey, _Arguments} | Rest]) ->
+probe_bindings(Server, JID, [#binding{exchange_name = {
+                                        #resource{name = XNameBin}}} | Rest]) ->
     ?DEBUG("**** Probing ~p ~p ~p", [JID, XNameBin, Server]),
     SourceJID = jlib:make_jid(binary_to_list(XNameBin), Server, ""),
     send_presence(SourceJID, JID, "probe"),
