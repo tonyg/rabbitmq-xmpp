@@ -564,8 +564,8 @@ probe_queues(Server, [#amqqueue{name = QName = #resource{name = QNameBin}} | Res
 
 probe_bindings(_Server, _JID, []) ->
     ok;
-probe_bindings(Server, JID, [#binding{exchange_name = {
-                                        #resource{name = XNameBin}}} | Rest]) ->
+probe_bindings(Server, JID,
+               [#binding{exchange_name = #resource{name = XNameBin}} | Rest]) ->
     ?DEBUG("**** Probing ~p ~p ~p", [JID, XNameBin, Server]),
     SourceJID = jlib:make_jid(binary_to_list(XNameBin), Server, ""),
     send_presence(SourceJID, JID, "probe"),
